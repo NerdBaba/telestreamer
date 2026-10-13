@@ -570,32 +570,53 @@ class MediaDiagnosticTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg required for media replay")
 class RelayStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def media_without_playlist(self, age):
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        base = Path(directory)
+        relay = Relay({"admin_token": "isolated-startup-token", "output_dir": "hls"}, base)
+        process = subprocess.Popen([
+            "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+            "-re", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25",
+            "-f", "null", "-",
+        ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(self.terminate, process)
+        relay.media = process
+        relay.media_started = time.monotonic() - age
+        relay.current = relay.desired = "rwitc"
+        relay.decision = {"chosen": "rwitc", "available": True}
+        return relay, process
+
+    @staticmethod
+    def terminate(process):
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+
+    async def test_a_bootstrapping_capture_is_given_time_to_produce_its_first_segment(self):
+        # The pinned capture answers its playlist with no segments while ingest
+        # bootstraps, which was measured to last well over a minute. Killing
+        # media at 20 seconds restarted the ingest and prevented any start.
+        relay, process = await self.media_without_playlist(daemon.MEDIA_START_GRACE - 10)
+        try:
+            await relay.reconcile()
+            self.assertIsNone(process.poll(), "media must survive the capture bootstrap window")
+            self.assertIsNotNone(relay.media)
+        finally:
+            await relay.stop_media()
+
     async def test_alive_media_without_first_playlist_has_finite_startup_timeout(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
-            relay = Relay({"admin_token": "isolated-startup-token", "output_dir": "hls"}, base)
-            process = subprocess.Popen([
-                "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
-                "-re", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25",
-                "-f", "null", "-",
-            ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            relay.media = process
-            relay.media_started = time.monotonic() - 21
-            relay.current = relay.desired = "rwitc"
-            relay.decision = {"chosen": "rwitc", "available": True}
-            try:
-                self.assertIsNone(process.poll())
-                self.assertFalse((relay.output / "index.m3u8").exists())
-                await relay.reconcile()
-                self.assertIsNotNone(process.poll(), "alive media must not wait forever for its first playlist")
-                self.assertIsNone(relay.media)
-                self.assertFalse(relay.ready())
-                self.assertGreater(relay.next_start, time.monotonic(), "startup failures retain restart backoff")
-            finally:
-                await relay.stop_media()
-                if process.poll() is None:
-                    process.kill()
-                    process.wait()
+        relay, process = await self.media_without_playlist(daemon.MEDIA_START_GRACE + 1)
+        try:
+            self.assertIsNone(process.poll())
+            self.assertFalse((relay.output / "index.m3u8").exists())
+            await relay.reconcile()
+            self.assertIsNotNone(process.poll(), "alive media must not wait forever for its first playlist")
+            self.assertIsNone(relay.media)
+            self.assertFalse(relay.ready())
+            self.assertGreater(relay.next_start, time.monotonic(), "startup failures retain restart backoff")
+        finally:
+            await relay.stop_media()
 
 
 if __name__ == "__main__":

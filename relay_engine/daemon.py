@@ -30,6 +30,16 @@ from relay_engine.session_restore import restore_session
 WORKER = "https://rwitc-racing.kristopherreed0227-1etlk.workers.dev"
 
 
+MEDIA_START_GRACE = 90.0
+"""Seconds a new media process may take to publish its first segment.
+
+The pinned capture answers its playlist with no segments while Telegram ingest
+bootstraps, and that was measured to last well over a minute. Restarting media
+inside that window aborts the ingest and prevents any start, so the first
+playlist gets a longer grace than a playlist that simply stops advancing.
+"""
+
+
 def restart_delay(failures: int) -> float:
     """Growing, capped delay before restarting failed media.
 
@@ -617,7 +627,9 @@ class Relay:
                 try:
                     stalled = time.time() - (self.output / "index.m3u8").stat().st_mtime >= 20
                 except FileNotFoundError:
-                    stalled = self.media_started is not None and time.monotonic() - self.media_started >= 20
+                    # No playlist yet: the capture is still bootstrapping ingest.
+                    stalled = (self.media_started is not None
+                               and time.monotonic() - self.media_started >= MEDIA_START_GRACE)
                 if stalled:
                     self.last_error = "media output stalled; restarting"
                     self.media_failures += 1
