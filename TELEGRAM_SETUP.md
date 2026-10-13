@@ -74,6 +74,20 @@ for those routes can still list channels in `playlist.m3u`, so a live row does
 not prove that its media is being captured. Verify the two routes before
 treating a member-channel failure as a relay fault.
 
+### Liveness is read from the playlist, never by requesting a stream
+
+Requesting a stream URL makes the capture host start ingesting it, and every
+ingest needs a Telegram authorization export to the stream's datacenter, which
+Telegram flood limits. Polling the pinned stream URL for liveness therefore kept
+that export exhausted and the broadcast never started: tgtv logged
+`stream DC 5 not ready until …` and answered `503 ingest start failed` within
+about two seconds of each attempt.
+
+The relay now decides pinned availability from `playlist.m3u` membership, which
+is a discovery document, and a failing media process backs off from 3 seconds to
+a 60-second cap instead of retrying every 3 seconds. The player page still
+requests its stream directly, so leaving a preview open retries the upstream.
+
 ### Admin panel
 Secret URL, not a searchable path:
 
