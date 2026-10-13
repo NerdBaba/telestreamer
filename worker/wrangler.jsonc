@@ -1,0 +1,25 @@
+{
+  "name": "rwitc-racing",
+  "main": "src/index.ts",
+  "account_id": "0d67f3b7813e178d795f2a5b736306e3",
+  "compatibility_date": "2026-10-10",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rwitc-telegram",
+      "database_id": "d9010546-1b5c-45cd-b901-3c3308654b33"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "traces": { "enabled": true }
+  },
+  "triggers": {
+    "crons": ["*/10 * * * *"]
+  },
+  "vars": {
+    "RWITC_API": "https://api.rwitc.com/login",
+    "RWITC_ORIGIN": "https://api.rwitc.com"
+  }
+}

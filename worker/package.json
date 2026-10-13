@@ -1,0 +1,19 @@
+{
+  "name": "rwitc-racing",
+  "private": true,
+  "version": "1.1.0",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mtproto/core": "6.3.0"
+  },
+  "devDependencies": {
+    "@types/events": "^3.0.3",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.0",
+    "wrangler": "^4.149.0"
+  }
+}

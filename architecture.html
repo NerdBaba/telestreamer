@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RRR India Racing Relay — Architecture</title>
+<style>
+ :root{--fg:currentColor;--muted:var(--muted);--border:var(--border);--surface:var(--surface);
+  --c1:var(--c1);--c2:var(--c2);--c3:var(--c3);--c4:var(--c4);--c5:var(--c5);--c6:var(--c6)}
+ *{box-sizing:border-box} body{margin:0;font:15px/1.55 ui-sans-serif,system-ui,sans-serif;max-width:1180px;padding:26px 20px 60px;margin-inline:auto}
+ h1{font-size:24px;margin:0 0 4px} .sub{color:var(--muted);margin:0 0 26px}
+ .wrap{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start}
+ @media(max-width:940px){.wrap{grid-template-columns:1fr}}
+ .card{border:1px solid var(--border);border-radius:12px;padding:16px;background:var(--surface);margin-bottom:16px}
+ .card h2{font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 12px}
+ .stage{border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:18px;overflow-x:auto}
+ .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-bottom:10px}
+ .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+ svg{display:block;min-width:760px}
+ .node{cursor:pointer} .node rect{stroke-width:1.5;transition:filter .15s}
+ .node:hover rect{filter:brightness(1.12)}
+ .node text{font-size:12.5px;fill:var(--fg)} .node .m{font-size:10.5px;fill:var(--muted)}
+ .lbl{font-size:10.5px;fill:var(--muted)}
+ path.flow{fill:none;stroke-width:2;stroke-dasharray:7 5;animation:dash 1.1s linear infinite}
+ @keyframes dash{to{stroke-dashoffset:-24}}
+ .detail{border:1px solid var(--c1);border-radius:12px;padding:16px;background:var(--surface);position:sticky;top:20px}
+ .detail h3{margin:0 0 2px;font-size:16px} .tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;border:1px solid var(--border);color:var(--muted);margin-bottom:10px}
+ ul{margin:8px 0 0;padding-left:18px} li{margin:4px 0}
+ code{font:12.5px ui-monospace,monospace;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+ .flowline{margin:6px 0 0;font-size:12.5px;color:var(--muted)}
+ .pill{font-size:11px;border:1px solid var(--border);border-radius:6px;padding:2px 7px;margin-right:6px;color:var(--muted)}
+ table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+ th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)}
+ th{color:var(--muted);font-weight:500}
+ .kind-untouched{outline:2px dashed var(--c5);outline-offset:3px}
+ h2.sec{color:var(--fg);font-size:17px;text-transform:none;letter-spacing:0;margin:22px 0 4px}
+ .secgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+ .mini{border:1px solid var(--border);border-radius:10px;padding:12px}
+ .mini b{font-size:13px} .mini p{margin:6px 0 0;font-size:12.5px;color:var(--muted)}
+</style></head><body>
+<h1>RRR India Racing Relay — automatic restream + admin panel</h1>
+<p class="sub">Turbo goes live → relay captures from the Hugging Face stream → restreams into your own Telegram channel. Click any block for detail.</p>
+
+<div class="wrap">
+<div>
+<div class="stage">
+<div class="legend">
+<span><i style="background:var(--c1)"></i>New / changed</span>
+<span><i style="background:var(--c2)"></i>Existing</span>
+<span><i style="background:var(--c5)"></i>Untouched</span>
+<span>→ solid = media</span><span>⇢ dashed = control / status</span>
+</div>
+<svg viewBox="0 0 800 640" width="100%" role="img" aria-label="Relay architecture diagram">
+ <defs><marker id="a" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+  <path d="M0,0 L9,4.5 L0,9 z" fill="var(--muted)"/></marker></defs>
+
+ <g class="node" data-k="hf"><rect x="20" y="60" width="200" height="96" rx="10" fill="var(--c5)" fill-opacity=".14" stroke="var(--c5)"/>
+  <text x="32" y="84">Hugging Face Space</text><text class="m" x="32" y="101">tgtv capture → Turbo HLS</text>
+  <text class="m" x="32" y="118">bahama-tgtv-turbo-trial</text><text class="m" x="32" y="135">CPUs · ZeroGPU preview</text></g>
+
+ <g class="node" data-k="det"><rect x="290" y="20" width="200" height="80" rx="10" fill="var(--c1)" fill-opacity=".16" stroke="var(--c1)"/>
+  <text x="302" y="44">turbo_events</text><text class="m" x="302" y="61">public t.me/s poll</text>
+  <text class="m" x="302" y="78">“Live stream started/finished”</text></g>
+
+ <g class="node" data-k="arb"><rect x="20" y="230" width="200" height="80" rx="10" fill="var(--c1)" fill-opacity=".16" stroke="var(--c1)"/>
+  <text x="32" y="254">sources.py</text><text class="m" x="32" y="271">Turbo-first priority</text>
+  <text class="m" x="32" y="288">rwitc only as fallback</text></g>
+
+ <g class="node" data-k="daemon"><rect x="290" y="170" width="220" height="180" rx="10" fill="var(--c2)" fill-opacity=".14" stroke="var(--c2)"/>
+  <text x="302" y="194" style="font-weight:600">relay daemon (Render Free)</text>
+  <text class="m" x="302" y="214">reconcile() loop · 0.5 s</text>
+  <rect x="302" y="226" width="196" height="60" rx="7" fill="var(--c1)" fill-opacity=".13" stroke="var(--c1)"/>
+  <text x="312" y="246">auto_start</text><text class="m" x="312" y="262">live ⇒ start media +</text><text class="m" x="312" y="277">create RTMP call automatically</text>
+  <rect x="302" y="294" width="196" height="44" rx="7" fill="var(--c2)" fill-opacity=".1" stroke="var(--c2)"/>
+  <text x="312" y="313">durable state</text><text class="m" x="312" y="329">paused · forced · auto_start</text></g>
+
+ <g class="node" data-k="ff"><rect x="560" y="230" width="220" height="86" rx="10" fill="var(--c1)" fill-opacity=".13" stroke="var(--c1)"/>
+  <text x="572" y="254">FFmpeg + rtmp_sender</text><text class="m" x="572" y="271">copy mode, no re-encode</text>
+  <text class="m" x="572" y="288">single upstream stream</text></g>
+
+ <g class="node" data-k="dash"><rect x="560" y="20" width="220" height="120" rx="10" fill="var(--c1)" fill-opacity=".13" stroke="var(--c1)"/>
+  <text x="572" y="44">dashboard + /api/control</text>
+  <text class="m" x="572" y="61">Turbo live? · RWITC live?</text>
+  <text class="m" x="572" y="78">race fixtures · publishing state</text>
+  <text class="m" x="572" y="95">pause / resume / stop / auto</text>
+  <text class="m" x="572" y="112">admin token gate</text></g>
+
+ <g class="node" data-k="cf"><rect x="20" y="400" width="440" height="120" rx="10" fill="var(--c1)" fill-opacity=".16" stroke="var(--c1)"/>
+  <text x="32" y="424">Cloudflare Worker — rwitc-racing</text>
+  <rect x="32" y="436" width="200" height="66" rx="7" fill="var(--surface)" stroke="var(--c1)"/>
+  <text x="42" y="456">/admin/&lt;secret&gt;</text><text class="m" x="42" y="473">public page, no channel</text><text class="m" x="42" y="490">details in Worker secrets</text>
+  <rect x="248" y="436" width="200" height="66" rx="7" fill="var(--surface)" stroke="var(--c1)"/>
+  <text x="258" y="456">cron */10 * * * *</text><text class="m" x="258" y="473">warms the Worker only</text><text class="m" x="258" y="490">keep-alive is not a guarantee</text></g>
+
+ <g class="node" data-k="tg"><rect x="560" y="400" width="220" height="96" rx="10" fill="var(--c2)" fill-opacity=".14" stroke="var(--c2)"/>
+  <text x="572" y="424">@rrrliveindia</text><text class="m" x="572" y="441">live stream · RTMP call</text>
+  <text class="m" x="572" y="458">viewer bandwidth → Telegram</text></g>
+
+ <path class="flow" d="M120 156 L120 230" stroke="var(--c1)" marker-end="url(#a)"/>
+ <text class="lbl" x="126" y="196">live?</text>
+ <path class="flow" d="M220 100 L560 100 L560 230" stroke="var(--c2)" marker-end="url(#a)"/>
+ <text class="lbl" x="352" y="94">one HTTPS stream</text>
+ <path class="flow" d="M510 256 L560 268" stroke="var(--muted)" marker-end="url(#a)"/>
+ <path class="flow" d="M670 316 L670 400" stroke="var(--c1)" marker-end="url(#a)"/>
+ <text class="lbl" x="678" y="362">RTMP 1935</text>
+ <path class="flow" d="M460 350 L560 350 L560 140" stroke="var(--c1)" marker-end="url(#a)"/>
+ <text class="lbl" x="466" y="344">status / control</text>
+ <path class="flow" d="M400 460 L400 520 L560 520 L560 496" stroke="var(--muted)" marker-end="url(#a)"/>
+ <text class="lbl" x="404" y="540">keep-alive ping</text>
+ <path class="flow" d="M240 520 L120 520 L120 156" stroke="var(--muted)" stroke-dasharray="3 6" marker-end="url(#a)"/>
+ <text class="lbl" x="126" y="534">HF health</text>
+</svg>
+</div>
+
+<h2 class="sec">Deployment status</h2>
+<div class="card"><table>
+<tr><th>Component</th><th>State</th><th>Detail</th></tr>
+<tr><td>Hugging Face Space</td><td>Deployed</td><td>Turbo capture + HLS, CPU streaming, optional GPU preview</td></tr>
+<tr><td>Cloudflare Worker</td><td>Deployed</td><td>44/44 tests green; cron <code>*/10 * * * *</code> live; <code>ADMIN_SECRET</code> set</td></tr>
+<tr><td>Private relay (Render)</td><td>Blocked</td><td>Needs <code>@rrrliveindia</code> Telegram login and HF input URL</td></tr>
+</table></div>
+
+<h2 class="sec">What changes</h2>
+<div class="card"><table>
+<tr><th>#</th><th>Change</th><th>File</th><th>Effect</th></tr>
+<tr><td>1</td><td>Turbo-first source priority</td><td><code>relay_engine/sources.py</code></td><td>Turbo live wins immediately; RWITC only when Turbo is quiet</td></tr>
+<tr><td>2</td><td>Automatic start / stop</td><td><code>relay_engine/daemon.py</code></td><td>Live source starts media + creates the RTMP call with no human press; pause/stop still override</td></tr>
+<tr><td>3</td><td>Hugging Face as input</td><td>Relay <code>input_url</code></td><td>Relay pulls the one HF stream; it never runs a second capture</td></tr>
+<tr><td>4</td><td>Source + fixtures panel</td><td><code>worker/src/admin.ts</code></td><td>Secret admin URL shows live state, races, publishing state</td></tr>
+<tr><td>5</td><td>Worker secret admin + cron</td><td><code>worker/src/admin.ts</code>, <code>index.ts</code></td><td>Secret URL, noindex panel, control proxy; cron warms the Worker only</td></tr>
+</table></div>
+
+<h2 class="sec">Data flow when Turbo goes live</h2>
+<div class="card"><ol style="margin:0;padding-left:20px">
+<li><b>Detect</b> — <code>turbo_events</code> polls the public preview and sees “Live stream started”. No login, no MTProto.</li>
+<li><b>Arbitrate</b> — <code>sources.resolve()</code> returns <code>chosen: turbosportslive</code>.</li>
+<li><b>Start</b> — <code>reconcile()</code> starts FFmpeg against the HF Turbo HLS URL.</li>
+<li><b>Open channel</b> — <code>TelegramPublisher</code> gets RTMP credentials and creates the call only if none exists.</li>
+<li><b>Push</b> — <code>rtmp_sender</code> streams the local playlist to Telegram. Bandwidth is served by Telegram.</li>
+<li><b>Watch</b> — the Worker cron pings relay <code>/healthz</code> and HF <code>/health</code>.</li>
+<li><b>Stop</b> — “Live stream finished” flips the signal; media stops and the call created here is discarded.</li>
+</ol>
+<p class="flowline"><span class="pill">No re-host</span><span class="pill">One upstream copy</span><span class="pill">HF repo stays generic</span><span class="pill">Channel + RTMP key stay in Worker/relay secrets</span></p></div>
+</div>
+
+<div class="detail" id="detail">
+<h3>Turbo restream</h3>
+<span class="tag" id="tag">Changed</span>
+<p id="body">Select a block in the diagram.</p>
+</div>
+</div>
+
+<script>
+const D={
+ hf:{t:"Hugging Face Space — unchanged",k:"Untouched",b:`
+  <p>Existing, working deployment. It is the only public-facing component and stays generic:</p>
+  <ul><li>captures Turbo's live broadcast via upstream <code>tgtv</code></li>
+  <li>serves token-gated HLS: <code>/p/&lt;PATH_SECRET&gt;/streams/2631340b81ae/play.m3u8</code></li>
+  <li>0.9 GB binary + OpenSSL FFmpeg on CPU</li></ul>
+  <p>No channel names, no RTMP credentials, no admin token.</p>`},
+ det:{t:"Live detector",k:"Existing, reused",b:`
+  <p><code>relay_engine/turbo_events.py</code> polls <code>https://t.me/s/turbosportslive</code>.</p>
+  <ul><li>signal only — it never joins the video chat, never logs in</li>
+  <li>reliable because Turbo posts a service message per broadcast</li>
+  <li>6 h ceiling stops a stale “started” being read as live</li></ul>`},
+ arb:{t:"Source arbitration",k:"Changed: Turbo-first",b:`
+  <p><code>sources.py</code> currently prefers RWITC. New order:</p>
+  <ul><li>Turbo live ⇒ chose Turbo, no RWITC fallback during a broadcast</li>
+  <li>Turbo quiet ⇒ RWITC official stream if it probes fresh</li>
+  <li>explicit admin <code>force</code> still overrides</li></ul>`},
+ daemon:{t:"Relay daemon",k:"Existing + auto-start",b:`
+  <p><code>relay_engine/daemon.py</code>. New durable control <code>auto_start</code>:</p>
+  <ul><li>live signal + <code>auto_start</code> + not paused ⇒ media starts</li>
+  <li>same trigger opens the Telegram RTMP call</li>
+  <li>state persists through the Worker <code>/api/relay-state</code> (D1)</li>
+  <li>pause / stop remain manual overrides</li></ul>
+  <p>Runs on Render Free only — it holds the Telegram session and the RTMP key.</p>`},
+ ff:{t:"FFmpeg + RTMP sender",k:"Reused",b:`
+  <p><code>media_mode: copy</code> — H.264/AAC are remuxed, never re-encoded.</p>
+  <ul><li>one FFmpeg reads the HF playlist</li>
+  <li><code>rtmp_sender</code> (native C) pushes to Telegram over RTMP</li>
+  <li>destination reaches the child only over a private stdin pipe</li></ul>`},
+ dash:{t:"Admin dashboard",k:"Changed: status panel",b:`
+  <p>Adds to the existing control room:</p>
+  <ul><li>Turbo live / offline + since</li>
+  <li>RWITC live / offline</li>
+  <li>race fixtures for racing days</li>
+  <li>publishing state and last error</li>
+  <li>pause / resume / stop / force / auto toggle</li></ul>`},
+ cf:{t:"Cloudflare Worker",k:"Changed: admin + cron",b:`
+  <p><code>rwitc-racing</code> keeps its public routes. Adds:</p>
+  <ul><li><code>/admin/&lt;ADMIN_SECRET&gt;</code> — one page, no channel details rendered</li>
+  <li><code>/api/admin/status</code>, <code>/api/admin/control</code> — proxy to the daemon, admin token injected from a Worker secret</li>
+  <li>D1 row or secret holds the relay origin</li>
+  <li>cron <code>*/10 * * * *</code> warms the Worker; relay and HF health stay visible in the panel</li></ul>
+  <p>Cron keeps the Worker warm. It does not keep a Hugging Face Space awake, and it does not keep the Render relay awake.</p>`},
+ tg:{t:"@rrrliveindia",k:"Verified target",b:`
+  <p>Restream destination, confirmed publicly reachable as
+  "RRR INDIA LIVE HORSE RACE".</p>
+  <ul><li>publisher requires creator or <code>manage_call</code> rights</li>
+  <li>a call is created only when none exists; a non-RTMP or scheduled call is never replaced</li>
+  <li>only calls created here are discarded on stop</li>
+  <li>viewer bandwidth is served by Telegram, not the relay host</li></ul>`}
+};
+const det=document.getElementById('detail'),tag=document.getElementById('tag'),body=document.getElementById('body');
+document.querySelectorAll('.node').forEach(n=>n.addEventListener('click',()=>{
+ const d=D[n.dataset.k];det.querySelector('h3').textContent=d.t;tag.textContent=d.k;body.innerHTML=d.b;
+ det.style.borderColor=n.querySelector('rect').getAttribute('stroke');
+}));
+</script>
+</body></html>

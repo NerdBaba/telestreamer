@@ -1,0 +1,30 @@
+# Credentials and state never get committed.
+#
+# rrr_live.session is the MTProto credential: anyone with it controls the
+# account until it is revoked. Treat it like a password.
+
+*.session
+*.session-journal
+rrr_config.json
+relay_state.json
+fixtures_cache.json
+.venv/
+__pycache__/
+*.pyc
+
+# ffmpeg scratch output
+relay_engine/*.ts
+relay_engine/*.m3u8
+
+# Local playout and edge login secrets
+.relay/
+.env*
+.dev.vars*
+*.session-wal
+*.session-shm
+worker/node_modules/
+worker/.wrangler/
+.relay-hf-input.env
+
+# Upstream binaries are already on Hugging Face; keep them out of git.
+tgtv_hf/bin/

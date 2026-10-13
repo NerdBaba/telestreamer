@@ -1,0 +1,8 @@
+**
+!Dockerfile
+!rwitc_live.py
+!relay_engine/
+!relay_engine/*.py
+!relay_engine/*.c
+!relay_engine/dashboard.html
+relay_engine/test_*.py

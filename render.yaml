@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: tintustream-relay
+    runtime: docker
+    plan: free
+    region: singapore
+    numInstances: 1
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: RTMP_URL
+        sync: false
+      - key: RTMP_KEY
+        sync: false
+      - key: TG_API_ID
+        sync: false
+      - key: TG_API_HASH
+        sync: false
+      - key: WORKER_URL
+        value: https://rwitc-racing.kristopherreed0227-1etlk.workers.dev
+      - key: RELAY_STATE_URL
+        value: https://rwitc-racing.kristopherreed0227-1etlk.workers.dev/api/relay-state
+      - key: RELAY_MEDIA_MODE
+        value: copy
+      - key: RELAY_HOST
+        value: 0.0.0.0
+      # The playback token in this URL is a secret: sync:false makes Render
+      # prompt for it at deploy time instead of storing it in this file.
+      - key: RELAY_INPUT_URL
+        sync: false
