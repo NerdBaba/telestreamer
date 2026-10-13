@@ -505,8 +505,51 @@ class DestinationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(relay.last_error, "discarded an ended call")
             self.assertEqual(relay.next_publish, 0)
 
+class PinnedAvailabilityTests(unittest.IsolatedAsyncioTestCase):
+    """Availability must come from the playlist, never from an ingest request."""
+
+    def relay(self, **extra):
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        config = {
+            "admin_token": "isolated-pinned-token",
+            "input_url": "https://space.example/p/token/streams/2631340b81ae/play.m3u8",
+            # Hosted defaults; discovery is what publishes playlist liveness.
+            "discover_channels": True,
+        }
+        config.update(extra)
+        return Relay(config, Path(directory))
+
+    async def test_playlist_membership_decides_without_requesting_the_stream(self):
+        relay = self.relay()
+        relay.active_stream_ids = {"2631340b81ae"}
+        self.assertTrue(relay.pinned_source_available())
+        relay.active_stream_ids = set()
+        self.assertFalse(relay.pinned_source_available())
+
+    async def test_discovery_disabled_falls_back_to_the_stream_probe(self):
+        relay = self.relay(discover_channels=False)
+        with patch.object(relay, "hf_input_ok", return_value=True) as probe:
+            self.assertTrue(relay.pinned_source_available())
+        probe.assert_called_once()
+
+    async def test_loop_input_is_always_available(self):
+        relay = self.relay(loop_input=True)
+        relay.active_stream_ids = set()
+        self.assertTrue(relay.pinned_source_available())
+
+
 class MediaDiagnosticTests(unittest.TestCase):
     """A media crash must explain itself without exposing the private input URL."""
+
+    def test_restart_delay_grows_and_is_capped(self):
+        # A remote capture is flood-limited by Telegram when a failing source is
+        # retried every few seconds, so the delay must grow and then hold.
+        self.assertEqual(daemon.restart_delay(1), 3.0)
+        self.assertEqual(daemon.restart_delay(2), 6.0)
+        self.assertEqual(daemon.restart_delay(3), 12.0)
+        self.assertEqual(daemon.restart_delay(6), 60.0)
+        self.assertEqual(daemon.restart_delay(50), 60.0)
 
     def test_detail_keeps_the_last_line_and_redacts_long_tokens(self):
         with tempfile.TemporaryDirectory() as directory:

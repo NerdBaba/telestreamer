@@ -43,6 +43,18 @@ def playlist_url(input_url: str) -> str:
     return _prefix(input_url) + "/playlist.m3u"
 
 
+def stream_id_from_url(input_url: str | None) -> str | None:
+    """The stream id of a playback URL, or None when it is not one.
+
+    Callers use this to decide liveness from the discovery playlist: requesting
+    the stream URL itself would start an upstream ingest.
+    """
+    if not isinstance(input_url, str):
+        return None
+    match = _PLAYLIST_STREAM.match(urlsplit(input_url).path)
+    return match.group(1) if match else None
+
+
 def stream_url(input_url: str, chat_id: int) -> str:
     return stream_url_for_id(input_url, stream_id(chat_id))
 

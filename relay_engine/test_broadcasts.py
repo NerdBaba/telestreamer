@@ -240,6 +240,22 @@ class DiscoveryExclusionTests(unittest.TestCase):
         self.assertFalse(source.broadcasts[0]["live"])
         self.assertNotIn("preview_url", source.broadcasts[0])
 
+    def test_forced_source_still_refreshes_playlist_liveness(self):
+        # A forced source skips Telegram membership discovery, but the pinned
+        # availability decision needs fresh playlist liveness, and that request
+        # must remain the cheap playlist rather than a stream ingest.
+        template = "https://space.example/p/private-token/streams/2631340b81ae/play.m3u8"
+        source = self.relay(4347395930)
+        source.config["input_url"] = template
+        source.next_discovery = time.monotonic() + 120
+
+        with patch("relay_engine.daemon.tgtv.fetch_live_stream_ids",
+                   return_value={tgtv.stream_id(2961901881)}) as fetch:
+            self.schedule(source.refresh_discoveries("turbosportslive"))
+
+        fetch.assert_called_once_with(template)
+        self.assertEqual(source.active_stream_ids, {tgtv.stream_id(2961901881)})
+
     def test_unavailable_hf_playlist_fails_closed_without_leaking_url(self):
         source = self.relay(4347395930)
         source.config["input_url"] = "https://space.example/p/private-token/streams/2631340b81ae/play.m3u8"

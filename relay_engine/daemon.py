@@ -30,6 +30,16 @@ from relay_engine.session_restore import restore_session
 WORKER = "https://rwitc-racing.kristopherreed0227-1etlk.workers.dev"
 
 
+def restart_delay(failures: int) -> float:
+    """Growing, capped delay before restarting failed media.
+
+    A remote capture is flood limited by Telegram when a failing source is
+    retried every few seconds, so repeated failures must back off instead of
+    hammering the upstream for a stream it cannot start.
+    """
+    return min(60.0, 3.0 * (2 ** (max(failures, 1) - 1)))
+
+
 def media_failure_detail(path: Path) -> str:
     """Last line of a failed media process, with any long token redacted.
 
@@ -172,6 +182,7 @@ class Relay:
         self.media = None
         self.media_started = None
         self.media_log = self.output.parent / "media.log"
+        self.media_failures = 0
         self.push = None
         self.current = None
         self.publisher = None
@@ -179,6 +190,7 @@ class Relay:
         self.publishing = "blocked: Telegram session or RTMP destination required"
         self._own_chat_id: int | None = None
         self.broadcasts: list[dict] = []
+        self.active_stream_ids: set[str] = set()
         self.next_discovery = 0.0
         self.discovery_error: str | None = None
         self.discovered_at = 0.0
@@ -264,14 +276,14 @@ class Relay:
                     }
                 elif self.config.get("input_url"):
                     # The configured TGTV URL remains the automatic fallback.
+                    await self.refresh_discoveries(forced)
                     self.decision = {
                         "chosen": forced or "turbosportslive",
-                        "available": bool(self.config.get("loop_input") or self.hf_input_ok()),
+                        "available": self.pinned_source_available(),
                         "reason": "explicit input",
                         "sources": {},
                         "forced": bool(forced),
                     }
-                    await self.refresh_discoveries(forced)
                 else:
                     live = await asyncio.to_thread(turbo_events.live_state)
                     decision = await asyncio.to_thread(sources.resolve, live, forced)
@@ -290,10 +302,12 @@ class Relay:
 
     async def refresh_discoveries(self, forced: str | None) -> None:
         """Refresh member channels slowly and TGTV liveness every poll cycle."""
-        if forced or not self.config.get("discover_channels"):
+        if not self.config.get("discover_channels"):
             return
         input_url = self.config.get("input_url")
-        refresh_membership = time.monotonic() >= self.next_discovery
+        # A forced source still needs fresh playlist liveness, but member
+        # membership discovery is Telegram traffic and waits for its interval.
+        refresh_membership = not forced and time.monotonic() >= self.next_discovery
         if refresh_membership:
             self.next_discovery = time.monotonic() + float(
                 self.config.get("discovery_interval", 120))
@@ -323,6 +337,7 @@ class Relay:
             for item in self.broadcasts:
                 item["live"] = False
                 item.pop("preview_url", None)
+            self.active_stream_ids = set()
             self.discovery_error = "TGTV live playlist is not configured"
             return
         try:
@@ -332,6 +347,7 @@ class Relay:
             self.discovery_error = f"TGTV live playlist unavailable ({type(exc).__name__})"
         else:
             self.discovery_error = None
+        self.active_stream_ids = active_ids
 
         for item in self.broadcasts:
             stream_id = item.get("stream_id") or tgtv.stream_id(item["chat_id"])
@@ -501,6 +517,22 @@ class Relay:
                     await self.publisher.close()
                 self.publisher = None
 
+    def pinned_source_available(self) -> bool:
+        """Whether the pinned stream is live, without starting an upstream ingest.
+
+        Requesting a stream URL makes the capture host start ingesting it, and
+        every ingest needs a Telegram authorization export that Telegram flood
+        limits; polling the stream URL would therefore keep that export
+        exhausted and prevent the broadcast from ever starting. Playlist
+        membership is a discovery fact and costs no ingest.
+        """
+        if self.config.get("loop_input"):
+            return True
+        if not self.config.get("discover_channels"):
+            return self.hf_input_ok()
+        stream_id = tgtv.stream_id_from_url(self.config.get("input_url"))
+        return bool(stream_id) and stream_id in self.active_stream_ids
+
     def hf_input_ok(self) -> bool:
         """Whether the pinned input URL is currently serving a live playlist.
 
@@ -578,8 +610,9 @@ class Relay:
                     f"media process exited ({self.media.returncode}); restarting"
                     + (f": {detail}" if detail else "")
                 )
+                self.media_failures += 1
                 await self.stop_media()
-                self.next_start = time.monotonic() + 3
+                self.next_start = time.monotonic() + restart_delay(self.media_failures)
             elif self.media:
                 try:
                     stalled = time.time() - (self.output / "index.m3u8").stat().st_mtime >= 20
@@ -587,8 +620,9 @@ class Relay:
                     stalled = self.media_started is not None and time.monotonic() - self.media_started >= 20
                 if stalled:
                     self.last_error = "media output stalled; restarting"
+                    self.media_failures += 1
                     await self.stop_media()
-                    self.next_start = time.monotonic() + 3
+                    self.next_start = time.monotonic() + restart_delay(self.media_failures)
             if not self.media and self.should_start_media() and time.monotonic() >= self.next_start:
                 input_url = self.source_input_url()
                 command = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error"]
@@ -615,6 +649,7 @@ class Relay:
                 self.last_error = None
             if not self.ready():
                 return
+            self.media_failures = 0
             if self.push and self.push.poll() is not None:
                 self.last_error = f"publishing process exited ({self.push.returncode}); reconnecting"
                 await self.terminate(self.push)
