@@ -626,7 +626,19 @@ def handler(relay: Relay):
                 page = Path(__file__).with_name("dashboard.html").read_bytes()
                 return self.respond(200, page, "text/html; charset=utf-8")
             if path == "/healthz":
-                return self.respond(200, {"ok": True})
+                # Report only presence, never values: a health endpoint is
+                # unauthenticated, so a secret value here would leak it.
+                return self.respond(200, {
+                    "ok": True,
+                    "config": {
+                        "discover_channels": bool(relay.config.get("discover_channels")),
+                        "discovery_interval": relay.config.get("discovery_interval"),
+                        "channel_set": bool(relay.config.get("channel")),
+                        "input_url_set": bool(relay.config.get("input_url")),
+                        "session_set": bool(relay.config.get("session")),
+                        "render": os.environ.get("RENDER", "").lower() == "true",
+                    },
+                })
             if path in ("/api/status", "/api/stream-status", "/api/fixtures"):
                 if not self.authorized():
                     return self.respond(401, {"error": "admin token required"})
