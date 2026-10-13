@@ -88,7 +88,8 @@ test('admin controls forward only canonical actions to the daemon', async t => {
     const valid = parsed.action === 'pause' || parsed.action === 'resume' || parsed.action === 'stop'
       || parsed.action === 'auto'
       || (parsed.action === 'force' && (parsed.source === 'rwitc' || parsed.source === 'turbosportslive'))
-      || (parsed.action === 'auto_start' && typeof parsed.enabled === 'boolean');
+      || (parsed.action === 'auto_start' && typeof parsed.enabled === 'boolean')
+      || parsed.action === 'release_call';
     return valid ? 200 : 400;
   });
   const control = async (body: unknown) => relay.fetch('/admin/' + SECRET + '/control', {
@@ -96,7 +97,8 @@ test('admin controls forward only canonical actions to the daemon', async t => {
   });
   for (const accepted of [{ action: 'pause' }, { action: 'resume' }, { action: 'stop' },
                           { action: 'auto' }, { action: 'force', source: 'turbosportslive' },
-                          { action: 'auto_start', enabled: false }]) {
+                          { action: 'auto_start', enabled: false },
+                          { action: 'release_call' }]) {
     assert.equal((await control(accepted)).status, 200, JSON.stringify(accepted));
   }
   for (const rejected of [{}, { action: 'delete' }, { action: 'force', source: 'other' },
@@ -133,26 +135,46 @@ test('selecting a member channel is forwarded only as a well-formed body', async
   assert.equal(relay.seen.filter(e => e.body?.includes('select_channel')).length, 1);
 });
 
-test('admin status carries the discovered member channels and no output channel', async t => {
+test('admin status exposes preview destinations and live-only source selection', async t => {
   const channels = [
-    { chat_id: 2961901881, title: 'Turbo Sports Hd Live', username: 'TurboSportsLive', live: true, rtmp: true, scheduled: false },
-    { chat_id: 2291644480, title: 'Free live india racing', username: null, live: false, rtmp: false, scheduled: false },
+    { chat_id: 2961901881, title: 'Turbo Sports Hd Live', username: 'TurboSportsLive', live: true, rtmp: true, scheduled: false, preview_url: 'https://hf.example/p/preview/watch/012345abcdef' },
+    { chat_id: 2291644480, title: 'Free live india racing', username: null, live: false, rtmp: false, scheduled: false, preview_url: null },
   ];
-  const relay = await relayStub(t, () => 200, {
-    paused: false, forced: null, auto_start: true,
+  const relay = await relayStub(t, body => {
+    if (body === null) return 200;
+    const parsed = JSON.parse(body ?? '{}') as Record<string, unknown>;
+    return parsed.action === 'select_channel' && parsed.chat_id === 2961901881 ? 200 : 400;
+  }, {
+    paused: false, forced: null, auto_start: true, selected_chat_id: 2961901881,
     decision: { chosen: 'turbosportslive', available: true, reason: 'live in Turbo', sources: {}, chat_id: 2961901881 },
     playout: { source: 'turbosportslive', ready: true, url: '/live/index.m3u8', pid: 4242 },
     publishing: { state: 'publishing process running', running: true },
     broadcasts: channels, last_error: null, fixtures: [],
   });
-  const page = await relay.fetch(`/admin/${SECRET}`);
-  assert.match(await page.text(), /Live sources from your channels/);
-  const status = await (await relay.fetch(`/admin/${SECRET}/status`)).json<any>();
-  assert.equal(status.broadcasts.length, 2);
-  // The panel offers a button only for a live channel.
-  assert.equal(status.broadcasts[0].live, true);
-  assert.equal(status.broadcasts[1].live, false);
-  assert.equal(status.broadcasts.some(row => row.title === 'RRR INDIA LIVE HORSE RACE'), false);
+  const response = await relay.fetch(`/admin/${SECRET}/status`);
+  assert.equal(response.status, 200);
+  const status = await response.json() as {
+    selected_chat_id: number;
+    broadcasts: Array<{ chat_id: number; live: boolean; preview_url: string | null }>;
+  };
+  assert.equal(status.selected_chat_id, 2961901881);
+  assert.deepEqual(status.broadcasts.map(row => ({
+    chat_id: row.chat_id, live: row.live, preview_url: row.preview_url,
+  })), [
+    { chat_id: 2961901881, live: true, preview_url: 'https://hf.example/p/preview/watch/012345abcdef' },
+    { chat_id: 2291644480, live: false, preview_url: null },
+  ]);
+
+  const start = await relay.fetch(`/admin/${SECRET}/control`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'select_channel', chat_id: status.broadcasts[0].chat_id }),
+  });
+  assert.equal(start.status, 200);
+  assert.deepEqual(JSON.parse(relay.seen.at(-1)?.body ?? '{}'), {
+    action: 'select_channel', chat_id: 2961901881,
+  });
+  assert.equal(relay.seen.some(entry => entry.body?.includes('2291644480')), false,
+    'an idle member channel must not issue a source-selection action');
 });
 
 test('method mismatch and unreachable daemon fail without exposing internals', async t => {

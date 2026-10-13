@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from telethon.errors import InviteHashExpiredError
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.functions.messages import CheckChatInviteRequest
+from telethon.tl.functions.phone import DiscardGroupCallRequest
 from telethon.tl.types import (
     Channel, ChatAdminRights, ChatInviteAlready, ChatPhotoEmpty, GroupCall, InputGroupCall,
 )
@@ -105,6 +106,7 @@ class ExistingCallTests(unittest.IsolatedAsyncioTestCase):
         entity = channel(manage_call=True)
         publisher = TelegramPublisher(api_id=1, api_hash="hash", session="s", channel=INVITE)
         publisher._entity = entity
+        discarded = []
 
         class Client:
             def is_connected(self):
@@ -116,10 +118,13 @@ class ExistingCallTests(unittest.IsolatedAsyncioTestCase):
                         full_chat=SimpleNamespace(call=InputGroupCall(7, 8)),
                         chats=[entity], users=[],
                     )
+                if isinstance(request, DiscardGroupCallRequest):
+                    discarded.append(request.call)
+                    return SimpleNamespace()
                 return SimpleNamespace(call=current)
 
         publisher.client = Client()
-        return publisher
+        return publisher, discarded
 
     async def test_non_rtmp_call_is_reported_with_its_facts(self):
         call = GroupCall(
@@ -127,16 +132,39 @@ class ExistingCallTests(unittest.IsolatedAsyncioTestCase):
             version=1, join_muted=False, can_change_join_muted=False,
             join_date_asc=False, rtmp_stream=False,
         )
+        publisher, _ = self.publisher(call)
         with self.assertRaises(TelegramAccessError) as raised:
-            await self.publisher(call).destination()
+            await publisher.destination()
         message = str(raised.exception)
         self.assertIn("rtmp=False", message)
         self.assertIn("participants=0", message)
 
     async def test_non_group_call_is_reported_as_such(self):
+        publisher, _ = self.publisher(SimpleNamespace(id=7))
         with self.assertRaises(TelegramAccessError) as raised:
-            await self.publisher(SimpleNamespace(id=7)).destination()
+            await publisher.destination()
         self.assertIn("not a Telegram group call", str(raised.exception))
+
+    async def test_release_discards_an_empty_non_rtmp_call(self):
+        call = GroupCall(
+            id=7, access_hash=8, participants_count=0, unmuted_video_limit=0,
+            version=1, join_muted=False, can_change_join_muted=False,
+            join_date_asc=False, rtmp_stream=False,
+        )
+        publisher, discarded = self.publisher(call)
+        self.assertEqual(await publisher.release_ended_call(), "discarded an ended call")
+        self.assertEqual(discarded, [InputGroupCall(7, 8)])
+
+    async def test_release_refuses_an_rtmp_call(self):
+        call = GroupCall(
+            id=7, access_hash=8, participants_count=0, unmuted_video_limit=0,
+            version=1, join_muted=False, can_change_join_muted=False,
+            join_date_asc=False, rtmp_stream=True,
+        )
+        publisher, discarded = self.publisher(call)
+        with self.assertRaises(TelegramAccessError):
+            await publisher.release_ended_call()
+        self.assertEqual(discarded, [], "an RTMP call must never be discarded")
 
 
 if __name__ == "__main__":

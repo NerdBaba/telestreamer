@@ -425,6 +425,12 @@ class Relay:
             if file.suffix in (".m3u8", ".ts", ".tmp"):
                 file.unlink(missing_ok=True)
 
+    def telegram_credentials(self) -> tuple[str, str] | None:
+        """API id/hash from config or environment; absent means no publishing."""
+        api_id = self.config.get("tg_api_id") or os.environ.get("TG_API_ID")
+        api_hash = self.config.get("tg_api_hash") or os.environ.get("TG_API_HASH")
+        return (api_id, api_hash) if api_id and api_hash else None
+
     async def resolve_destination(self) -> None:
         if self.destination or time.monotonic() < self.next_publish:
             return
@@ -440,10 +446,10 @@ class Relay:
             self.next_publish = 0
             self.publishing = "ready"
             return
-        api_id = self.config.get("tg_api_id") or os.environ.get("TG_API_ID")
-        api_hash = self.config.get("tg_api_hash") or os.environ.get("TG_API_HASH")
-        if not api_id or not api_hash:
+        credentials = self.telegram_credentials()
+        if credentials is None:
             return
+        api_id, api_hash = credentials
         try:
             from relay_engine.telegram import TelegramPublisher
             async with self.telegram_lock:
@@ -614,9 +620,9 @@ class Relay:
     async def control(self, body: dict) -> dict:
         action = body.get("action")
         if action not in ("pause", "resume", "stop", "force", "auto", "auto_start",
-                          "select_channel"):
+                          "select_channel", "release_call"):
             raise ValueError("action must be pause, resume, stop, force, auto, "
-                             "auto_start, or select_channel")
+                             "auto_start, select_channel, or release_call")
         if action == "force" and body.get("source") not in ("rwitc", "turbosportslive"):
             raise ValueError("source must be rwitc or turbosportslive")
         if action == "auto_start" and not isinstance(body.get("enabled"), bool):
@@ -647,6 +653,32 @@ class Relay:
                 raise ValueError("TGTV live sources are unavailable; refresh and retry") from None
             if stream_id not in active_ids:
                 raise ValueError("channel is no longer live; refresh and retry")
+
+        if action == "release_call":
+            credentials = self.telegram_credentials()
+            if credentials is None:
+                raise ValueError("Telegram API credentials are required to release an output call")
+            api_id, api_hash = credentials
+            from relay_engine.telegram import TelegramPublisher
+            async with self.control_lock, self.telegram_lock:
+                publisher = TelegramPublisher(
+                    api_id=int(api_id), api_hash=api_hash,
+                    session=str(self.path(self.config.get("session", "rrr_live"))),
+                    channel=self.config.get("channel", "https://t.me/+-UyRaC_GVSw3NTU1"),
+                )
+                try:
+                    await publisher.connect()
+                    released = await publisher.release_ended_call()
+                finally:
+                    with contextlib.suppress(Exception):
+                        await publisher.close()
+                # The discarded call invalidates any cached destination.
+                self.destination = None
+                self.publishing = "idle"
+                self.next_publish = 0
+                self.last_error = released
+                self.recheck.set()
+            return self.snapshot()
 
         async with self.control_lock:
             updated = {

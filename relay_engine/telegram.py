@@ -232,6 +232,34 @@ class TelegramPublisher:
                 self._created_call = InputGroupCall(created[0].id, created[0].access_hash)
             return credentials.url.rstrip("/") + "/" + credentials.key
 
+    async def release_ended_call(self) -> str:
+        """Discard an empty leftover call so an RTMP restream can start.
+
+        A channel holds one call at a time, so an ended or non-RTMP call blocks
+        every future broadcast. Only a call with no participants and no RTMP
+        stream is removed: a live or scheduled broadcast is never interrupted,
+        and this is never automatic, which is why an operator must ask for it.
+        """
+        from telethon.tl.functions.phone import DiscardGroupCallRequest, GetGroupCallRequest
+        from telethon.tl.types import GroupCall
+
+        self._require_connected()
+        async with self._destination_lock:
+            self._entity, full = await _full_channel(self.client, self._entity)
+            require_manage_call(self._entity)
+            call = getattr(full.full_chat, "call", None)
+            if call is None:
+                return "no call to discard"
+            current = (await self.client(GetGroupCallRequest(call, limit=1))).call
+            if not isinstance(current, GroupCall):
+                raise TelegramAccessError("The target's existing call is not a Telegram group call.")
+            if current.rtmp_stream or current.participants_count:
+                raise TelegramAccessError(
+                    "The target's call is an active or scheduled broadcast; it will not be discarded."
+                )
+            await self.client(DiscardGroupCallRequest(call))
+            return "discarded an ended call"
+
     async def announce(self, text: str) -> None:
         self._require_connected()
         await self.client.send_message(self._entity, text, parse_mode=None, link_preview=False)

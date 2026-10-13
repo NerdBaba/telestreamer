@@ -473,6 +473,37 @@ class DestinationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
 
             relay.resolve_destination.assert_not_awaited()
 
+    async def test_release_call_requires_telegram_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            relay = Relay({"admin_token": "isolated-release-token"}, Path(directory))
+            with patch.dict(os.environ, {"TG_API_ID": "", "TG_API_HASH": ""}):
+                with self.assertRaisesRegex(ValueError, "credentials"):
+                    await relay.control({"action": "release_call"})
+
+    async def test_release_call_discards_the_call_and_clears_the_destination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            relay = Relay({
+                "admin_token": "isolated-release-token",
+                "tg_api_id": 1,
+                "tg_api_hash": "isolated-api-hash",
+            }, Path(directory))
+            relay.destination = "rtmp://example.invalid/app/key"
+            relay.publishing = "blocked: TelegramAccessError"
+            publisher = SimpleNamespace(
+                connect=AsyncMock(),
+                release_ended_call=AsyncMock(return_value="discarded an ended call"),
+                close=AsyncMock(),
+            )
+
+            with patch("relay_engine.telegram.TelegramPublisher", return_value=publisher):
+                await relay.control({"action": "release_call"})
+
+            publisher.release_ended_call.assert_awaited_once()
+            self.assertEqual(relay.destination, None)
+            self.assertEqual(relay.publishing, "idle")
+            self.assertEqual(relay.last_error, "discarded an ended call")
+            self.assertEqual(relay.next_publish, 0)
+
 @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg required for media replay")
 class RelayStartupTests(unittest.IsolatedAsyncioTestCase):
     async def test_alive_media_without_first_playlist_has_finite_startup_timeout(self):
