@@ -464,6 +464,11 @@ class Relay:
             self.publishing = "ready"
         except Exception as exc:
             self.publishing = f"blocked: {type(exc).__name__}"
+            self.last_error = (
+                f"destination blocked: {exc}"
+                if type(exc).__name__ == "TelegramAccessError"
+                else f"destination resolution failed: {type(exc).__name__}"
+            )
             if self.publisher:
                 with contextlib.suppress(Exception):
                     await self.publisher.close()

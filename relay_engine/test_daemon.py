@@ -16,6 +16,11 @@ import unittest
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from relay_engine.telegram import TelegramAccessError
+
 
 from relay_engine.daemon import Relay
 
@@ -391,6 +396,47 @@ class RelayEnvironmentTests(RelayProcessHarness, unittest.TestCase):
                 self.assertFalse((self.directory / "rrr_config.json").exists())
                 self.assertNotIn(self.token.encode(), result.stdout + result.stderr)
 
+
+class DestinationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
+    async def test_destination_access_error_reports_safe_detail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            relay = Relay({
+                "admin_token": "isolated-destination-token",
+                "tg_api_id": 1,
+                "tg_api_hash": "isolated-api-hash",
+            }, Path(directory))
+            publisher = SimpleNamespace(
+                connect=AsyncMock(side_effect=TelegramAccessError(
+                    "The target requires creator or manage_call administrator rights.")),
+                close=AsyncMock(),
+            )
+
+            with patch("relay_engine.telegram.TelegramPublisher", return_value=publisher):
+                await relay.resolve_destination()
+
+            self.assertEqual(relay.publishing, "blocked: TelegramAccessError")
+            self.assertEqual(
+                relay.last_error,
+                "destination blocked: The target requires creator or manage_call administrator rights.",
+            )
+
+    async def test_destination_unknown_error_hides_message(self):
+        with tempfile.TemporaryDirectory() as directory:
+            relay = Relay({
+                "admin_token": "isolated-destination-token",
+                "tg_api_id": 1,
+                "tg_api_hash": "isolated-api-hash",
+            }, Path(directory))
+            publisher = SimpleNamespace(
+                connect=AsyncMock(side_effect=RuntimeError("private-token")),
+                close=AsyncMock(),
+            )
+
+            with patch("relay_engine.telegram.TelegramPublisher", return_value=publisher):
+                await relay.resolve_destination()
+
+            self.assertEqual(relay.last_error, "destination resolution failed: RuntimeError")
+            self.assertNotIn("private-token", relay.last_error)
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg required for media replay")
 class RelayStartupTests(unittest.IsolatedAsyncioTestCase):
