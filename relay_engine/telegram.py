@@ -190,9 +190,15 @@ class TelegramPublisher:
             call = getattr(full.full_chat, "call", None)
             if call is not None:
                 current = (await self.client(GetGroupCallRequest(call, limit=1))).call
-                if not isinstance(current, GroupCall) or not current.rtmp_stream:
+                if not isinstance(current, GroupCall):
                     raise TelegramAccessError(
-                        "The target already has a non-RTMP or ended call; it will not be replaced."
+                        "The target's existing call is not a Telegram group call; it will not be replaced."
+                    )
+                if not current.rtmp_stream:
+                    raise TelegramAccessError(
+                        "The target already has a non-RTMP or ended call "
+                        f"(rtmp={bool(current.rtmp_stream)}, participants={current.participants_count}, "
+                        f"scheduled={current.schedule_date is not None}); it will not be replaced."
                     )
                 if current.schedule_date is not None:
                     raise TelegramAccessError("The existing RTMP call is scheduled, not started.")

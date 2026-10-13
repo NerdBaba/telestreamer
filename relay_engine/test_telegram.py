@@ -8,10 +8,12 @@ from telethon.errors import InviteHashExpiredError
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.functions.messages import CheckChatInviteRequest
 from telethon.tl.types import (
-    Channel, ChatAdminRights, ChatInviteAlready, ChatPhotoEmpty, InputGroupCall,
+    Channel, ChatAdminRights, ChatInviteAlready, ChatPhotoEmpty, GroupCall, InputGroupCall,
 )
 
-from relay_engine.telegram import TelegramAccessError, resolve_channel, require_manage_call
+from relay_engine.telegram import (
+    TelegramAccessError, TelegramPublisher, require_manage_call, resolve_channel,
+)
 from telegram_login import _channel_report
 
 
@@ -94,6 +96,47 @@ class PrivateInviteTests(unittest.IsolatedAsyncioTestCase):
         client.full.full_chat.exported_invite.link = "https://t.me/+DifferentOpaqueHash"
         with self.assertRaises(TelegramAccessError):
             await resolve_channel(client, INVITE)
+
+
+class ExistingCallTests(unittest.IsolatedAsyncioTestCase):
+    """An incompatible output call must be described, never silently replaced."""
+
+    def publisher(self, current):
+        entity = channel(manage_call=True)
+        publisher = TelegramPublisher(api_id=1, api_hash="hash", session="s", channel=INVITE)
+        publisher._entity = entity
+
+        class Client:
+            def is_connected(self):
+                return True
+
+            async def __call__(self, request):
+                if isinstance(request, GetFullChannelRequest):
+                    return SimpleNamespace(
+                        full_chat=SimpleNamespace(call=InputGroupCall(7, 8)),
+                        chats=[entity], users=[],
+                    )
+                return SimpleNamespace(call=current)
+
+        publisher.client = Client()
+        return publisher
+
+    async def test_non_rtmp_call_is_reported_with_its_facts(self):
+        call = GroupCall(
+            id=7, access_hash=8, participants_count=0, unmuted_video_limit=0,
+            version=1, join_muted=False, can_change_join_muted=False,
+            join_date_asc=False, rtmp_stream=False,
+        )
+        with self.assertRaises(TelegramAccessError) as raised:
+            await self.publisher(call).destination()
+        message = str(raised.exception)
+        self.assertIn("rtmp=False", message)
+        self.assertIn("participants=0", message)
+
+    async def test_non_group_call_is_reported_as_such(self):
+        with self.assertRaises(TelegramAccessError) as raised:
+            await self.publisher(SimpleNamespace(id=7)).destination()
+        self.assertIn("not a Telegram group call", str(raised.exception))
 
 
 if __name__ == "__main__":
