@@ -29,6 +29,8 @@ services:
         value: copy
       - key: RELAY_HOST
         value: 0.0.0.0
+      - key: RENDER
+        value: "true"
       # The playback token in this URL is a secret: sync:false makes Render
       # prompt for it at deploy time instead of storing it in this file.
       - key: RELAY_INPUT_URL
