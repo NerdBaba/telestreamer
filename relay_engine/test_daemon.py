@@ -195,7 +195,7 @@ class RelayEnvironmentTests(RelayProcessHarness, unittest.TestCase):
             listener.bind(("127.0.0.1", 0))
             self.port = listener.getsockname()[1]
         self.token = "isolated-render-admin-token"
-        self.remote_state = {"paused": False, "forced": None, "auto_start": True}
+        self.remote_state = {"paused": False, "forced": None, "auto_start": True, "selected_chat_id": None}
         self.remote_reads_fail = False
         self.remote_writes_fail = False
         owner = self
@@ -229,10 +229,12 @@ class RelayEnvironmentTests(RelayProcessHarness, unittest.TestCase):
                 if owner.remote_writes_fail:
                     return self.respond(503, {"error": "storage unavailable"})
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                if (set(body) != {"paused", "forced", "auto_start"}
+                if (set(body) != {"paused", "forced", "auto_start", "selected_chat_id"}
                         or type(body["paused"]) is not bool
                         or type(body["auto_start"]) is not bool
-                        or body["forced"] not in (None, "rwitc", "turbosportslive")):
+                        or body["forced"] not in (None, "rwitc", "turbosportslive")
+                        or (body["selected_chat_id"] is not None
+                            and (type(body["selected_chat_id"]) is not int or body["selected_chat_id"] <= 0))):
                     return self.respond(400, {"error": "invalid state"})
                 owner.remote_state = body
                 self.respond(200, body)
@@ -244,7 +246,8 @@ class RelayEnvironmentTests(RelayProcessHarness, unittest.TestCase):
         contract_vars = {
             "RENDER", "ADMIN_TOKEN", "RTMP_URL", "RTMP_KEY", "WORKER_URL",
             "RELAY_STATE_URL", "RELAY_MEDIA_MODE", "RELAY_HOST", "PORT",
-            "RELAY_INPUT_URL", "RELAY_LOOP_INPUT", "TG_API_ID", "TG_API_HASH",
+            "RELAY_INPUT_URL", "RELAY_OUTPUT_CHAT_ID", "RELAY_LOOP_INPUT",
+            "TG_API_ID", "TG_API_HASH",
         }
         self.environment = {key: value for key, value in os.environ.items() if key not in contract_vars}
         self.environment.update({
@@ -351,7 +354,7 @@ class RelayEnvironmentTests(RelayProcessHarness, unittest.TestCase):
         self.until(lambda: self.status()["playout"]["ready"])
 
     def test_remote_write_failure_does_not_claim_resume_or_change_source(self):
-        self.remote_state = {"paused": True, "forced": "rwitc", "auto_start": True}
+        self.remote_state = {"paused": True, "forced": "rwitc", "auto_start": True, "selected_chat_id": None}
         self.start()
         self.remote_writes_fail = True
         self.assertEqual(self.request("/api/control", {"action": "resume"})[0], 500)
@@ -365,7 +368,8 @@ class RelayEnvironmentTests(RelayProcessHarness, unittest.TestCase):
 
     def test_unavailable_remote_state_fails_closed_without_local_default_fallback(self):
         self.remote_reads_fail = True
-        (self.directory / "relay_state.json").write_text('{"paused":false,"forced":null,"auto_start":true}')
+        (self.directory / "relay_state.json").write_text(
+            '{"paused":false,"forced":null,"auto_start":true,"selected_chat_id":null}')
         self.launch()
         stdout, stderr = self.process.communicate(timeout=15)
         self.assertNotEqual(self.process.returncode, 0)

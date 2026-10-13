@@ -16,13 +16,17 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 def _canonical(value: object) -> dict:
-    if (not isinstance(value, dict) or set(value) != {'paused', 'forced', 'auto_start'}
-            or type(value['paused']) is not bool
+    if not isinstance(value, dict) or set(value) != {'paused', 'forced', 'auto_start', 'selected_chat_id'}:
+        raise ValueError('Invalid relay state')
+    selected = value['selected_chat_id']
+    if (type(value['paused']) is not bool
             or type(value['auto_start']) is not bool
-            or value['forced'] not in (None, 'rwitc', 'turbosportslive')):
+            or value['forced'] not in (None, 'rwitc', 'turbosportslive')
+            or (selected is not None and (
+                type(selected) is not int or selected <= 0 or selected > 9007199254740991))):
         raise ValueError('Invalid relay state')
     return {'paused': value['paused'], 'forced': value['forced'],
-            'auto_start': value['auto_start']}
+            'auto_start': value['auto_start'], 'selected_chat_id': selected}
 
 
 def _request(url: str, token: str, state: dict | None) -> dict:

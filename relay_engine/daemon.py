@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.request
 from urllib.parse import unquote, urlsplit
 
-from relay_engine import fixtures, sources, state as durable_state, turbo_events
+from relay_engine import fixtures, sources, state as durable_state, tgtv, turbo_events
 from relay_engine.publishing import launch_publisher, media_environment
 from relay_engine.session_restore import restore_session
 
@@ -48,6 +48,7 @@ def load_config(raw_path: str | None) -> tuple[dict, Path]:
         "RELAY_MEDIA_MODE": "media_mode", "RELAY_HOST": "host", "PORT": "port",
         "RELAY_INPUT_URL": "input_url", "RELAY_DISCOVER_CHANNELS": "discover_channels",
         "RELAY_DISCOVERY_INTERVAL": "discovery_interval", "RELAY_CHANNEL": "channel",
+        "RELAY_OUTPUT_CHAT_ID": "output_chat_id",
     }
     render = os.environ.get("RENDER", "").lower() == "true"
     environment_only = raw_path is None and (
@@ -81,6 +82,13 @@ def load_config(raw_path: str | None) -> tuple[dict, Path]:
             raise ValueError("RELAY_DISCOVERY_INTERVAL must be a number") from None
         if config["discovery_interval"] < 30:
             raise ValueError("RELAY_DISCOVERY_INTERVAL must be at least 30 seconds")
+    if "RELAY_OUTPUT_CHAT_ID" in os.environ:
+        try:
+            config["output_chat_id"] = int(os.environ["RELAY_OUTPUT_CHAT_ID"])
+        except ValueError:
+            raise ValueError("RELAY_OUTPUT_CHAT_ID must be a positive integer") from None
+        if config["output_chat_id"] <= 0:
+            raise ValueError("RELAY_OUTPUT_CHAT_ID must be a positive integer")
     if "RELAY_LOOP_INPUT" in os.environ:
         value = os.environ["RELAY_LOOP_INPUT"].lower()
         if value not in ("true", "false", "1", "0"):
@@ -99,10 +107,10 @@ def load_config(raw_path: str | None) -> tuple[dict, Path]:
         config.setdefault("media_mode", "copy")
         config.setdefault("discover_channels", True)
         config.setdefault("discovery_interval", 120)
-        # The output channel is pinned by numeric id: it resolves from the
-        # session's local cache with no network call, so discovery never has to
-        # look up an invite. A rename cannot invalidate it either.
-        config.setdefault("channel", "4347395930")
+        # Keep the private invite as the publishing destination; the numeric
+        # id is only used to exclude that output channel from source discovery.
+        config.setdefault("channel", "https://t.me/+-UyRaC_GVSw3NTU1")
+        config.setdefault("output_chat_id", 4347395930)
     if not isinstance(config.get("admin_token"), str) or len(config["admin_token"]) < 16:
         raise ValueError("an admin token of at least 16 characters is required")
     config.setdefault("worker_url", WORKER)
@@ -129,7 +137,7 @@ class Relay:
         self.state_path = self.path(config.get("state_path", "relay_state.json"))
         if self.state_url:
             # No ephemeral default is permitted to start media before durable state loads.
-            saved = {"paused": True, "forced": None}
+            saved = {"paused": True, "forced": None, "selected_chat_id": None}
         else:
             try:
                 saved = json.loads(self.state_path.read_text())
@@ -137,6 +145,9 @@ class Relay:
                 saved = {}
         self.paused = bool(saved.get("paused", False))
         self.forced = saved.get("forced") if saved.get("forced") in ("rwitc", "turbosportslive") else None
+        selected = saved.get("selected_chat_id")
+        self.selected_chat_id = selected if type(selected) is int and selected > 0 else None
+        self.manual_start_chat_id: int | None = None
         self.auto_start = bool(config.get("auto_start", True))
         self.decision = {"chosen": None, "available": False, "reason": "checking sources", "sources": {}}
         self.meetings = fixtures.load_cached_meetings(str(self.path("fixtures_cache.json")))
@@ -148,15 +159,16 @@ class Relay:
         self.publisher = None
         self.destination = None
         self.publishing = "blocked: Telegram session or RTMP destination required"
+        self._own_chat_id: int | None = None
         self.broadcasts: list[dict] = []
         self.next_discovery = 0.0
         self.discovery_error: str | None = None
         self.discovered_at = 0.0
-        self._own_chat_id: int | None = None
         self.last_error = None
         self.next_start = 0.0
         self.next_publish = 0.0
         self.lock = asyncio.Lock()
+        self.telegram_lock = asyncio.Lock()
         # Control must answer before a media cycle finishes. reconcile() holds
         # self.lock across slow to_thread work, so control takes this lock
         # instead and never queues behind it. Both are only ever taken in this
@@ -177,6 +189,8 @@ class Relay:
                 saved = await asyncio.to_thread(durable_state.load_state, self.state_url, self.token)
                 self.paused, self.forced = saved["paused"], saved["forced"]
                 self.auto_start = saved.get("auto_start", self.auto_start)
+                selected = saved.get("selected_chat_id")
+                self.selected_chat_id = selected if type(selected) is int and selected > 0 else None
                 self.state_loaded = True
 
     def ready(self) -> bool:
@@ -194,6 +208,7 @@ class Relay:
     def snapshot(self) -> dict:
         return {
             "paused": self.paused, "forced": self.forced, "auto_start": self.auto_start,
+            "selected_chat_id": self.selected_chat_id,
             "pending_reason": self.pending_reason(),
             "decision": self.decision,
             "playout": {"source": self.current, "ready": self.ready(),
@@ -214,30 +229,37 @@ class Relay:
             self.recheck.clear()
             forced = self.forced
             try:
-                if self.config.get("input_url"):
-                    # An explicit input_url pins one source. Turbo remains the
-                    # intended pinned feed; RWITC is the alternate.
+                if self.selected_chat_id is not None and not forced:
+                    await self.refresh_discoveries(None)
+                    row = next((item for item in self.broadcasts
+                                if item["chat_id"] == self.selected_chat_id), None)
+                    live = bool(row and row.get("live")
+                                and tgtv.is_playback_url(self.config.get("input_url")))
+                    self.decision = {
+                        "chosen": f"telegram:{self.selected_chat_id}",
+                        "available": live,
+                        "reason": (f"live in {row['title']}" if live
+                                   else "selected member channel is not live or unavailable"),
+                        "sources": {},
+                        "forced": False,
+                        "chat_id": self.selected_chat_id,
+                    }
+                elif self.config.get("input_url"):
+                    # The configured TGTV URL remains the automatic fallback.
                     self.decision = {
                         "chosen": forced or "turbosportslive",
-                        # A looped local input always has media; a networked
-                        # input is probed so the relay never starts against a
-                        # dead feed.
                         "available": bool(self.config.get("loop_input") or self.hf_input_ok()),
                         "reason": "explicit input",
                         "sources": {},
                         "forced": bool(forced),
                     }
+                    await self.refresh_discoveries(forced)
                 else:
                     live = await asyncio.to_thread(turbo_events.live_state)
                     decision = await asyncio.to_thread(sources.resolve, live, forced)
                     if forced == self.forced:
                         self.decision = decision
-                # Any channel the session is a member of is a candidate, so a
-                # new racing feed needs no redeploy. The relay's own output
-                # channel is excluded so it never restreams itself. Opt-in
-                # only, and rate-limited, because each pass connects to
-                # Telegram.
-                await self.refresh_discoveries(forced)
+                    await self.refresh_discoveries(forced)
             except Exception as exc:
                 self.decision = {"chosen": None, "available": False,
                                  "reason": f"source check failed: {type(exc).__name__}", "sources": {}}
@@ -249,107 +271,115 @@ class Relay:
                 pass
 
     async def refresh_discoveries(self, forced: str | None) -> None:
-        """List the member channels and adopt a live one when none is pinned.
-
-        Discovery is opt-in because each pass opens a Telegram connection, and
-        it is rate-limited by ``discovery_interval`` so a busy media loop does
-        not reconnect constantly. The relay's own output channel is excluded
-        from the list, so it never appears as a source it could restream into
-        itself. An admin ``forced`` selection always wins and a pinned
-        ``input_url`` is untouched.
-        """
+        """Refresh member channels slowly and TGTV liveness every poll cycle."""
         if forced or not self.config.get("discover_channels"):
             return
-        if time.monotonic() < self.next_discovery:
-            return
-        self.next_discovery = time.monotonic() + float(
-            self.config.get("discovery_interval", 120))
-        session = self.session_path()
-        if session is None or not os.path.exists(session):
-            self.discovery_error = "no restored Telegram session to discover from"
+        input_url = self.config.get("input_url")
+        refresh_membership = time.monotonic() >= self.next_discovery
+        if refresh_membership:
+            self.next_discovery = time.monotonic() + float(
+                self.config.get("discovery_interval", 120))
+            session = self.session_path()
+            if session is None or not os.path.isfile(session):
+                self.discovery_error = "no restored Telegram session to discover from"
+                return
+            try:
+                rows, own = await self._with_telegram(self._discover_broadcasts)
+            except Exception as exc:
+                self.discovery_error = f"Telegram discovery failed ({type(exc).__name__})"
+                return
+            self.discovered_at = time.time()
+            if own is None:
+                self.broadcasts = []
+                self.discovery_error = "output channel not resolved; no sources published"
+                return
+            self.broadcasts = []
+            for row in rows:
+                if row["chat_id"] == own:
+                    continue
+                item = dict(row)
+                item["stream_id"] = tgtv.stream_id(item["chat_id"])
+                item.pop("preview_url", None)
+                self.broadcasts.append(item)
+        if not input_url:
+            for item in self.broadcasts:
+                item["live"] = False
+                item.pop("preview_url", None)
+            self.discovery_error = "TGTV live playlist is not configured"
             return
         try:
-            rows = await asyncio.to_thread(self._list_broadcasts, session)
-            own = await asyncio.to_thread(self._own_channel_id, session)
+            active_ids = await asyncio.to_thread(tgtv.fetch_live_stream_ids, input_url)
         except Exception as exc:
-            # Surface it instead of silently reporting no channels.
-            self.discovery_error = f"{type(exc).__name__}: {exc}"
-            return
-        self.discovery_error = None
-        self.discovered_at = time.time()
-        if own is None:
-            # The output channel could not be resolved, so no list is published.
-            # Failing open here would offer the relay's own channel as a
-            # source, which is the one thing that must never appear.
-            self.broadcasts = []
-            self.discovery_error = "output channel not resolved; no sources published"
-            return
-        self.broadcasts = [
-            row for row in rows
-            if row["chat_id"] != own
-        ]
-        if not self.config.get("input_url") and not self.decision.get("available"):
-            picked = next((row for row in self.broadcasts if row["live"]), None)
-            if picked:
-                self.decision = {
-                    "chosen": "turbosportslive",
-                    "available": True,
-                    "reason": f"live in {picked['title']}",
-                    "sources": {},
-                    "forced": False,
-                    "chat_id": picked["chat_id"],
-                }
+            active_ids = set()
+            self.discovery_error = f"TGTV live playlist unavailable ({type(exc).__name__})"
+        else:
+            self.discovery_error = None
+
+        for item in self.broadcasts:
+            stream_id = item.get("stream_id") or tgtv.stream_id(item["chat_id"])
+            item["stream_id"] = stream_id
+            item["live"] = stream_id in active_ids
+            if item["live"]:
+                item["scheduled"] = False
+                item["preview_url"] = tgtv.preview_url_for_id(input_url, stream_id)
+            else:
+                item.pop("preview_url", None)
 
     def session_path(self) -> str | None:
-        target = str(self.config.get("session", "rrr_live"))
+        target = str(self.path(str(self.config.get("session", "rrr_live"))))
         return target if target.endswith(".session") else target + ".session"
 
-    def _list_broadcasts(self, session: str) -> list[dict]:
-        """Enumerate member channels on a private thread; never publishes."""
+    async def _discover_broadcasts(self, client) -> tuple[list[dict], int | None]:
         from relay_engine import broadcasts
 
-        async def run(client):
-            return await broadcasts.discover_broadcasts(client)
+        rows = await broadcasts.discover_broadcasts(client)
+        own = await self._own_channel_id(client)
+        return rows, own
 
-        return self._with_telegram(session, run)
-
-    def _own_channel_id(self, session: str) -> int | None:
-        """The relay's own output channel, so it is never listed as a source.
-
-        The id is resolved once and cached: re-resolving through an invite or
-        username on every discovery pass creates needless Telegram traffic and
-        eventually a flood wait, which would then suppress discovery entirely.
-        """
+    async def _own_channel_id(self, client) -> int | None:
+        """Resolve the output ID once; it must never appear as a source."""
         if self._own_chat_id is not None:
             return self._own_chat_id
-        from relay_engine import telegram
-
+        configured = self.config.get("output_chat_id")
+        if type(configured) is int and configured > 0:
+            self._own_chat_id = configured
+            return configured
+        if isinstance(configured, str) and configured.isdecimal() and int(configured) > 0:
+            self._own_chat_id = int(configured)
+            return self._own_chat_id
+        if self.publisher and self.publisher._entity is not None:
+            self._own_chat_id = self.publisher._entity.id
+            return self._own_chat_id
         target = self.config.get("channel")
         if not target:
             return None
+        from relay_engine import telegram
 
-        async def run(client):
-            try:
-                # A numeric id resolves from the local cache without any
-                # network call, which is what avoids repeated invite lookups.
-                if isinstance(target, str) and target.lstrip("-").isdigit():
-                    entity = await client.get_entity(int(target))
-                else:
-                    entity, _ = await telegram.resolve_channel(client, target)
-                return entity.id
-            except Exception:
-                return None
+        try:
+            if isinstance(target, str) and target.lstrip("-").isdigit():
+                entity = await client.get_entity(int(target))
+            else:
+                entity, _ = await telegram.resolve_channel(client, target)
+        except Exception:
+            return None
+        self._own_chat_id = entity.id
+        return self._own_chat_id
 
-        resolved = self._with_telegram(session, run)
-        if resolved is not None:
-            self._own_chat_id = resolved
-        return resolved
-
-    def _with_telegram(self, session: str, operation):
-        """Run one authorized Telegram call on a private thread, then disconnect."""
+    async def _with_telegram(self, operation):
+        """Serialize access to the authorized SQLite session and reuse publisher."""
         from telethon import TelegramClient
 
-        async def run():
+        async with self.telegram_lock:
+            publisher = self.publisher
+            if (publisher and publisher.client is not None
+                    and publisher.client.is_connected()):
+                return await operation(publisher.client)
+            if publisher and publisher.client is not None:
+                with contextlib.suppress(Exception):
+                    await publisher.close()
+            session = self.session_path()
+            if session is None:
+                raise RuntimeError("Telegram session unavailable")
             client = TelegramClient(
                 session,
                 int(self.config.get("tg_api_id") or os.environ.get("TG_API_ID", "0")),
@@ -359,9 +389,6 @@ class Relay:
                 return await operation(client)
             finally:
                 await client.disconnect()
-
-        import asyncio
-        return asyncio.run(run())
 
     async def calendar(self) -> None:
         if self.config.get("input_url"):
@@ -419,13 +446,20 @@ class Relay:
             return
         try:
             from relay_engine.telegram import TelegramPublisher
-            self.publisher = TelegramPublisher(
-                api_id=int(api_id), api_hash=api_hash,
-                session=str(self.path(self.config.get("session", "rrr_live"))),
-                channel=self.config.get("channel", "https://t.me/+-UyRaC_GVSw3NTU1"),
-            )
-            await self.publisher.connect()
-            self.destination = await self.publisher.destination()
+            async with self.telegram_lock:
+                self.publisher = TelegramPublisher(
+                    api_id=int(api_id), api_hash=api_hash,
+                    session=str(self.path(self.config.get("session", "rrr_live"))),
+                    channel=self.config.get("channel", "https://t.me/+-UyRaC_GVSw3NTU1"),
+                )
+                try:
+                    await self.publisher.connect()
+                    self.destination = await self.publisher.destination()
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        await self.publisher.close()
+                    self.publisher = None
+                    raise
             self.next_publish = 0
             self.publishing = "ready"
         except Exception as exc:
@@ -454,6 +488,15 @@ class Relay:
         except Exception:
             return False
 
+
+    def source_input_url(self) -> str:
+        chat_id = self.decision.get("chat_id")
+        if (chat_id is not None and chat_id == self.selected_chat_id
+                and self.decision.get("chosen") == f"telegram:{chat_id}"):
+            return tgtv.stream_url(self.config["input_url"], chat_id)
+        return (self.config.get("input_url")
+                or self.config.get("worker_url", WORKER).rstrip("/") + "/api/live")
+
     def should_start_media(self) -> bool:
         """Whether the current source and admin state permit starting playout.
 
@@ -464,7 +507,8 @@ class Relay:
         """
         if self.paused:
             return False
-        if not self.auto_start:
+        if (not self.auto_start and (self.selected_chat_id is None
+                                    or self.manual_start_chat_id != self.selected_chat_id)):
             return False
         return bool(self.decision.get("chosen")) and bool(self.decision.get("available"))
 
@@ -474,7 +518,8 @@ class Relay:
             return None
         if self.paused:
             return "paused by admin"
-        if not self.auto_start:
+        if (not self.auto_start and (self.selected_chat_id is None
+                                    or self.manual_start_chat_id != self.selected_chat_id)):
             return "waiting for manual start"
         if self.decision.get("forced"):
             return None
@@ -509,7 +554,7 @@ class Relay:
                     await self.stop_media()
                     self.next_start = time.monotonic() + 3
             if not self.media and self.should_start_media() and time.monotonic() >= self.next_start:
-                input_url = self.config.get("input_url") or self.config.get("worker_url", WORKER).rstrip("/") + "/api/live"
+                input_url = self.source_input_url()
                 command = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error"]
                 if self.config.get("loop_input"):
                     command += ["-stream_loop", "-1", "-re"]
@@ -568,49 +613,91 @@ class Relay:
             raise ValueError("source must be rwitc or turbosportslive")
         if action == "auto_start" and not isinstance(body.get("enabled"), bool):
             raise ValueError("auto_start requires a boolean enabled field")
+        chat_id = None
         if action == "select_channel":
-            # Shape is validated first so a malformed body gets a precise error
-            # rather than the availability rejection below.
             chat_id = body.get("chat_id")
-            if not isinstance(chat_id, int) or isinstance(chat_id, bool) or chat_id <= 0:
-                raise ValueError("select_channel requires a positive integer chat_id")
+            if (type(chat_id) is not int or chat_id <= 0
+                    or chat_id > 9007199254740991):
+                raise ValueError("select_channel requires a positive safe integer chat_id")
+            row = next((item for item in self.broadcasts if item["chat_id"] == chat_id), None)
+            if row is None or not row.get("live"):
+                raise ValueError("channel is not currently live")
+            output_id = self.config.get("output_chat_id")
+            if isinstance(output_id, str) and output_id.isdecimal():
+                output_id = int(output_id)
+            if chat_id == output_id or chat_id == self._own_chat_id:
+                raise ValueError("the output channel cannot be selected as a source")
+            input_url = self.config.get("input_url")
+            if not tgtv.is_playback_url(input_url):
+                raise ValueError("TGTV playback input is not configured")
+            stream_id = tgtv.stream_id(chat_id)
+            if row.get("stream_id") != stream_id:
+                raise ValueError("channel stream identity is invalid")
+            try:
+                active_ids = await asyncio.to_thread(tgtv.fetch_live_stream_ids, input_url)
+            except Exception:
+                raise ValueError("TGTV live sources are unavailable; refresh and retry") from None
+            if stream_id not in active_ids:
+                raise ValueError("channel is no longer live; refresh and retry")
+
         async with self.control_lock:
-            updated = {"paused": self.paused, "forced": self.forced, "auto_start": self.auto_start}
+            updated = {
+                "paused": self.paused,
+                "forced": self.forced,
+                "auto_start": self.auto_start,
+                "selected_chat_id": self.selected_chat_id,
+            }
             if action in ("pause", "stop", "resume"):
                 updated["paused"] = action != "resume"
             elif action in ("force", "auto"):
                 updated["forced"] = body["source"] if action == "force" else None
+                updated["selected_chat_id"] = None
             elif action == "auto_start":
                 updated["auto_start"] = body["enabled"]
+            elif action == "select_channel":
+                updated["paused"] = False
+                updated["forced"] = None
+                updated["selected_chat_id"] = chat_id
             if self.state_url:
                 await asyncio.to_thread(durable_state.save_state, self.state_url, self.token, updated)
             else:
                 await asyncio.to_thread(save_private, self.state_path, updated)
+
+            self.paused = updated["paused"]
+            self.forced = updated["forced"]
             self.auto_start = updated["auto_start"]
+            self.selected_chat_id = updated["selected_chat_id"]
+            if action == "select_channel":
+                row = next(item for item in self.broadcasts if item["chat_id"] == chat_id)
+                self.manual_start_chat_id = chat_id if not self.auto_start else None
+                self.decision = {
+                    "chosen": f"telegram:{chat_id}",
+                    "available": True,
+                    "reason": f"live in {row['title']}",
+                    "sources": {},
+                    "forced": False,
+                    "chat_id": chat_id,
+                }
+            elif action in ("force", "auto"):
+                self.manual_start_chat_id = None
+                reason = "checking forced source" if action == "force" else "checking automatic source"
+                self.decision = dict(self.decision, chosen=None, available=False, reason=reason)
+                self.decision.pop("chat_id", None)
+            elif action == "stop":
+                self.manual_start_chat_id = None
+            elif action == "auto_start" and not self.auto_start:
+                self.manual_start_chat_id = None
+
             if action in ("pause", "stop"):
-                self.paused = True
                 await self.stop_media()
             elif action == "resume":
-                self.paused = False
-            elif action == "force":
-                self.forced = body["source"]
-                self.decision = dict(self.decision, chosen=None, available=False, reason="checking forced source")
-            elif action == "auto":
-                self.forced = None
-                self.decision = dict(self.decision, chosen=None, available=False, reason="checking automatic source")
-            elif action == "select_channel":
-                # The media loop still feeds the configured input_url, so
-                # selecting a channel here would start the wrong feed. The
-                # action is rejected until the selected chat drives the input
-                # path; the list stays visible for status only.
-                raise ValueError(
-                    "selecting a member channel is not available yet: the media "
-                    "input still comes from the configured source")
-            if action in ("force", "auto", "resume"):
+                self.recheck.set()
+            if action in ("force", "auto", "select_channel", "auto_start"):
                 self.recheck.set()
             if action == "stop" and self.publisher:
-                await self.publisher.close(stop_call=True)
-                self.publisher = None
+                async with self.telegram_lock:
+                    await self.publisher.close(stop_call=True)
+                    self.publisher = None
                 self.destination = None
                 self.next_publish = 0
             return self.snapshot()

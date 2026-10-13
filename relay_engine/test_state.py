@@ -9,7 +9,7 @@ from relay_engine.state import load_state, save_state
 
 class StateTests(unittest.TestCase):
     def setUp(self):
-        self.state = {"paused": False, "forced": None, "auto_start": True}
+        self.state = {"paused": False, "forced": None, "auto_start": True, "selected_chat_id": None}
         self.status = 200
         self.response = None
         self.requests = []
@@ -51,24 +51,33 @@ class StateTests(unittest.TestCase):
 
     def test_roundtrip_independent_requests(self):
         self.assertEqual(load_state(self.url, 'private-token'), self.state)
-        state = {'paused': True, 'forced': 'turbosportslive', 'auto_start': True}
+        state = {'paused': True, 'forced': 'turbosportslive', 'auto_start': True,
+                 'selected_chat_id': 2961901881}
         self.assertIsNone(save_state(self.url, 'private-token', state))
         self.assertEqual(load_state(self.url, 'private-token'), state)
         self.assertEqual([method for method, _ in self.requests], ['GET', 'PUT', 'GET'])
 
     def test_invalid_input_never_reaches_service(self):
-        for state in [None, {}, {'paused': 1, 'forced': None, 'auto_start': True}, {'paused': False, 'forced': 'bad', 'auto_start': True},
-                      {'paused': False, 'forced': None, 'auto_start': True, 'secret': 'private-token'}]:
+        valid = {'paused': False, 'forced': None, 'auto_start': True, 'selected_chat_id': None}
+        for state in [None, {}, {'paused': 1, 'forced': None, 'auto_start': True, 'selected_chat_id': None},
+                      {'paused': False, 'forced': 'bad', 'auto_start': True, 'selected_chat_id': None},
+                      {**valid, 'selected_chat_id': True},
+                      {**valid, 'selected_chat_id': 0},
+                      {**valid, 'selected_chat_id': 9007199254740992},
+                      {**valid, 'secret': 'private-token'}]:
             with self.subTest(state=state), self.assertRaises(ValueError):
                 save_state(self.url, 'private-token', state)
         self.assertEqual(self.requests, [])
 
     def test_bad_responses_fail_without_defaults_or_secret_details(self):
-        for response in [b'private-token rtmp-key', b'{}', b'null', b'{"paused":1,"forced":null}',
-                         b'{"paused":false,"forced":null,"extra":0}',
-                         b'{"paused":false,"forced":null}',
-                         b'{"paused":false,"forced":null,"auto_start":"yes"}',
-                         b'{"paused":false,"forced":null,"auto_start":true,"extra":0}', b'x' * 4097]:
+        for response in [b'private-token rtmp-key', b'{}', b'null',
+                         b'{"paused":1,"forced":null,"auto_start":true,"selected_chat_id":null}',
+                         b'{"paused":false,"forced":null,"auto_start":true,"selected_chat_id":"1"}',
+                         b'{"paused":false,"forced":null,"auto_start":true,"selected_chat_id":1.5}',
+                         b'{"paused":false,"forced":null,"auto_start":true,"selected_chat_id":0}',
+                         b'{"paused":false,"forced":null,"auto_start":true,"selected_chat_id":9007199254740992}',
+                         b'{"paused":false,"forced":null,"auto_start":true,"selected_chat_id":null,"extra":0}',
+                         b'{"paused":false,"forced":null,"auto_start":true}', b'x' * 4097]:
             self.response = response
             with self.subTest(response=response[:40]), self.assertRaises(RuntimeError) as error:
                 load_state(self.url, 'private-token')
@@ -83,6 +92,15 @@ class StateTests(unittest.TestCase):
             self.assertNotIn('private-token', str(error.exception))
             self.assertNotIn('rtmp-key', str(error.exception))
 
+    def test_save_requires_canonical_confirmation(self):
+        for response in [b'{}', b'{"paused":false,"forced":null,"auto_start":true}']:
+            self.response = response
+            with self.subTest(response=response), self.assertRaises(RuntimeError):
+                save_state(self.url, 'private-token', {
+                    'paused': True, 'forced': 'rwitc', 'auto_start': True,
+                    'selected_chat_id': None,
+                })
+
     def test_unauthorized_and_unavailable_do_not_fake_defaults(self):
         with self.assertRaises(RuntimeError):
             load_state(self.url, 'wrong-token')
@@ -91,11 +109,6 @@ class StateTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             load_state(self.url, 'private-token')
 
-    def test_save_requires_canonical_confirmation(self):
-        for response in [b'{}', b'{"paused":false,"forced":null}']:
-            self.response = response
-            with self.subTest(response=response), self.assertRaises(RuntimeError):
-                save_state(self.url, 'private-token', {'paused': True, 'forced': 'rwitc', 'auto_start': True})
 
     def test_redirects_are_not_followed_with_authorization(self):
         self.status = 302
