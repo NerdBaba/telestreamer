@@ -21,6 +21,8 @@ services:
         sync: false
       - key: TG_API_HASH
         sync: false
+      - key: TELEGRAM_SESSION_B64
+        sync: false
       - key: WORKER_URL
         value: https://rwitc-racing.kristopherreed0227-1etlk.workers.dev
       - key: RELAY_STATE_URL
@@ -42,7 +44,9 @@ services:
       # prompt for it at deploy time instead of storing it in this file.
       - key: RELAY_INPUT_URL
         sync: false
-      # The restream target. Public channel username; no invite hash, so a
-      # rotated invite never breaks the relay.
+      # Keep the existing private invite as the publishing destination.
       - key: RELAY_CHANNEL
         value: "https://t.me/+-UyRaC_GVSw3NTU1"
+      # Numeric output ID is only used to exclude RRR from source discovery.
+      - key: RELAY_OUTPUT_CHAT_ID
+        value: "4347395930"
