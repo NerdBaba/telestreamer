@@ -542,10 +542,10 @@ class Relay:
                 self.desired = selected
                 await self.stop_media()
                 self.next_start = 0
-            # The Telegram destination is resolved before any source is live,
-            # so the RTMP credentials and channel are ready the moment a
-            # broadcast starts instead of being fetched during the start.
-            await self.resolve_destination()
+            # Destination credentials are prepared before a live source so output
+            # is ready at start, but pause is a hard override of all Telegram calls.
+            if not self.paused:
+                await self.resolve_destination()
             if not selected:
                 return
             if self.media and self.media.poll() is not None:

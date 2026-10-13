@@ -463,6 +463,16 @@ class DestinationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
                 "destination retry delayed by Telegram flood wait (90 seconds)",
             )
 
+    async def test_paused_reconcile_does_not_resolve_destination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            relay = Relay({"admin_token": "isolated-pause-token"}, Path(directory))
+            relay.paused = True
+            relay.resolve_destination = AsyncMock()
+
+            await relay.reconcile()
+
+            relay.resolve_destination.assert_not_awaited()
+
 @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg required for media replay")
 class RelayStartupTests(unittest.IsolatedAsyncioTestCase):
     async def test_alive_media_without_first_playlist_has_finite_startup_timeout(self):
