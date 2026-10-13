@@ -19,7 +19,7 @@ export type Env = Cloudflare.Env & TelegramEnv & RelayEnv;
 import { handleProbe } from "./mtproto/probe";
 import { handleTelegram, type TelegramEnv } from "./mtproto/telegram";
 import { adminPage, adminRelayControl } from "./admin";
-import { fixturesResponse, relayLive, relayStatus, type RelayEnv } from "./relay";
+import { fixturesResponse, relayLive, relayStatus, wakeRelay, type RelayEnv } from "./relay";
 import { telegramLoginPage } from "./telegram-login";
 import { handleRelayState } from "./relay-state";
 
@@ -543,6 +543,15 @@ export default {
         { status: 500, headers: { "Access-Control-Allow-Origin": "*" } },
       );
     }
+  },
+
+  /**
+   * Runs every 10 minutes. Render's free plan stops the relay after 15 minutes
+   * without inbound traffic, which would hide a live Turbo broadcast from it,
+   * so the trigger keeps the relay awake between source checks.
+   */
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(wakeRelay(env).then(() => undefined));
   },
 } satisfies ExportedHandler<Env>;
 

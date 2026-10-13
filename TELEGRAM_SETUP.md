@@ -4,23 +4,23 @@
 
 Three pieces, one stream:
 
-1. **Hugging Face Space** — capture and public stream. Unmodified upstream
-   `tgtv` plus MediaMTX, pinned to
-   `69ddb30949cdeb604820a5d324e01b1b76a7b79a`; MediaMTX is `1.19.2`. The Space
-   at `bahama-tgtv-turbo-trial.hf.space` serves the Turbo HLS playlist behind
-   `PATH_SECRET`. All encoding happens here. Repo:
-   `Bahama/tgtv-turbo-trial`.
-2. **Private relay** — restream. `relay_engine/daemon.py` pulls that single
-   HLS playlist, remuxes with `-c copy` (no re-encode), and pushes RTMP to the
-   Telegram channel. Runs on Render Free: 0.1 CPU / 512 MB is enough because
-   stream-copy is network-bound, not CPU-bound.
+1. **Hugging Face Space** — capture and protected HLS for live Telegram
+   broadcasts visible to the authorized account. Unmodified upstream `tgtv`
+   plus MediaMTX is pinned to `69ddb30949cdeb604820a5d324e01b1b76a7b79a`;
+   MediaMTX is `1.19.2`. The active playlist identifies live channels and
+   stable stream IDs. Repo: `Bahama/tgtv-turbo-trial`.
+2. **Private relay** — restream. `relay_engine/daemon.py` pulls the selected
+   channel's HLS playlist, remuxes with `-c copy`, and pushes RTMP to the
+   configured RRR destination. Chat `4347395930` is excluded as a source.
+   Runs on Render Free: 0.1 CPU / 512 MB is enough because stream-copy is
+   network-bound, not CPU-bound.
 3. **Cloudflare Worker** — control plane and public site. `rwitc-racing`
    serves the RWITC official stream, race fixtures, and an admin panel.
 
 ```mermaid
 flowchart LR
-  HF["Hugging Face Space<br/>Turbo capture + HLS"] -->|"one HTTPS stream"| RL["Private relay<br/>copy-mode remux + RTMP"]
-  RW["RWITC official<br/>signed HLS"] -->|"admin picks as source"| RL
+  HF["Hugging Face Space<br/>Member-channel capture + HLS"] -->|"selected live stream"| RL["Private relay<br/>copy-mode remux + RTMP"]
+  RW["RWITC official<br/>signed HLS"] -->|"automatic fallback"| RL
   RL --> TG["@rrrliveindia<br/>Telegram live stream"]
   WK["Cloudflare Worker"] -->|"control + status"| RL
   WK --> RW
@@ -35,18 +35,23 @@ serves, and the thin private relay performs the RTMP push. HF might be
 UPnP-capable but **does not** imply privileged egress: RTMP remains blocked.
 This is the single architectural constraint.
 
-### Turbo-first automatic restream
+### Selecting and restreaming member-channel broadcasts
 
-`sources.py` prioritises Turbo, then falls back to the official RWITC stream
-while Turbo is quiet, so your channel is not idle. `turbo_events.py` polls the
-public `t.me/s/turbosportslive` preview for `Live stream started` /
-`Live stream finished`; no login, no MTProto, no Turbo access to your identity.
+The private admin panel lists only member-channel broadcasts confirmed live by
+Hugging Face. Its `/p/<PATH_SECRET>/playlist.m3u` is the live source of truth;
+the relay refreshes that liveness on every monitor poll while Telegram
+membership discovery remains interval-based. The relay maps each chat ID to
+upstream tgtv's stable `sha256(str(chat_id))[:12]` stream ID. The RRR output
+chat `4347395930` is always excluded.
 
-`auto_start` defaults to **on**: when a source is live, the relay starts media
-and opens the Telegram RTMP call by itself. A live source alone is enough to
-start the restream. `pause` and `stop` still outrank the source, so the admin
-can always take manual control. Turning `auto_start` off requires a manual
-start from the admin panel.
+Open **Preview stream** to view that exact stream, then click **Start restream**.
+This explicit Start also works when `auto_start` is off. Pause and Stop remain
+overrides. Selecting **Automatic** clears the manual source and returns to the
+configured automatic source behavior.
+
+The existing output invite remains
+`https://t.me/+-UyRaC_GVSw3NTU1`; `RELAY_OUTPUT_CHAT_ID=4347395930` is only an
+exclusion value and does not replace the invite.
 
 `telegram.py` resolves the target channel, verifies creator or `manage_call`
 rights, calls `GetGroupCallStreamRtmpUrl`, and creates an RTMP call only if
@@ -61,11 +66,11 @@ https://rwitc-racing.kristopherreed0227-1etlk.workers.dev/admin/<ADMIN_SECRET>
 ```
 
 `ADMIN_SECRET` is a Cloudflare secret, not in the repository, and never in
-chat. The page is `noindex` and self-contained. It shows live state, the
-chosen source, race fixtures, and play/pause/stop/auto-start controls. **No
-channel identity, RTMP host, or relay origin appears in the page** — those stay
-in Worker secrets and the relay token is applied server-side on every proxied
-call. A test asserts those strings are absent from the rendered HTML.
+chat. The page is `noindex` and self-contained. It shows member-channel names,
+live state, Hugging Face previews, the selected source, race fixtures, and
+play/pause/stop/auto-start controls. The private page may expose the
+PATH_SECRET-protected preview URL, but sends no referrer to Hugging Face. It
+does not expose the RTMP host, relay origin, or relay bearer token.
 
 ### Admin control never waits behind a media cycle
 
@@ -79,19 +84,21 @@ playout is busy. Covered by `relay_engine/test_control_latency.py`.
 
 ### Durable controls
 
-Controls persist in D1 `relay_state` (`paused`,
-`forced` ∈ {`rwitc`,`turbosportslive`} ∪ {NULL}, `auto_start`), so pause,
-source choice, and auto-start survive restart and Render's ephemeral disk.
-A failed durable write never reports a successful change, and unavailable
-durable state fails closed instead of defaulting to unpaused.
+Controls persist in D1 `relay_state` (`paused`, `forced`,
+`auto_start`, `selected_chat_id`). Pause, source selection, and auto-start
+survive restart and Render's ephemeral disk. A failed durable write never
+reports a successful change, and unavailable durable state fails closed
+instead of defaulting to unpaused.
 
 ### Worker cron
 
 `*/10 * * * *` triggers the deployed Worker (visible in
-`wrangler deploy` output as `schedule: */10 * * * *`). **The cron keeps the
-Worker warm; it does not keep a Hugging Face Space awake, and it does not
-keep the Render relay awake.** Render Free still spins down after 15 minutes
-without inbound traffic. Use the admin URL or the relay `/healthz` to wake it.
+`wrangler deploy` output as `schedule: */10 * * * *`). The scheduled handler
+requests the relay `/healthz`, which is the inbound traffic that stops Render
+Free from spinning down after 15 idle minutes; without it the relay could not
+notice a live Turbo broadcast. The ping carries no credentials and the endpoint
+reports configuration presence only. It does not keep a Hugging Face Space
+awake, and a relay that is already asleep takes one request to wake.
 
 ## Retired capture deployment
 
@@ -176,6 +183,13 @@ or quota errors are caught outside the decorator and produce a real CPU
 thumbnail instead; HLS endpoints and relay processes never depend on GPU
 allocation. The Gradio launcher performs ZeroGPU's startup handshake.
 
+The selected-channel player is
+`/p/<PATH_SECRET>/watch/<stream_id>`. It requests the matching
+`/p/<PATH_SECRET>/streams/<stream_id>/play.m3u8`; the legacy `/watch` route
+continues to open Turbo's stable stream ID. The relay reads
+`/p/<PATH_SECRET>/playlist.m3u` to determine which member channels are live.
+The playback token remains private, and the player sends no referrer.
+
 The hosted revision started successfully, `/health` returned 200, the
 Turbo master advertised 1280×720 H.264 at 30 fps plus AAC, and the browser
 displayed the current Hyderabad broadcast. The optional preview returned
@@ -203,10 +217,11 @@ Official lifecycle controls: https://huggingface.co/docs/hub/spaces-gpus#sleep-t
 
 ## Current implementation and limits
 
-The local relay serves playable HLS, supervises FFmpeg, persists pause/source
-controls across restarts, refreshes the race calendar daily, and can publish the
-same playout to a real RTMP destination. The dashboard is at
-`http://127.0.0.1:8800/` while the daemon runs.
+The relay serves playable HLS, supervises FFmpeg, and persists the selected
+member-channel source in D1. Discovery reads the Hugging Face live playlist;
+the admin preview and Start action route to that channel's stable HLS stream,
+then publish the same playout to the configured RTMP destination. The dashboard
+is at `http://127.0.0.1:8800/` while the daemon runs.
 
 **A channel invite or HLS link is not a publishing credential.** To broadcast in
 Telegram, use either the channel's RTMP server/key or an authorized Telegram user
@@ -259,7 +274,13 @@ Pause/source settings use the protected Cloudflare `/api/relay-state` endpoint
 and D1, not Render's ephemeral disk. A new container reloads those settings
 before starting media. A missing token or unavailable state backend fails
 closed; a failed durable write does not report a successful control change.
-The non-destructive schema is included in `worker/src/mtproto/schema.sql`.
+The fresh-database schema is `worker/src/mtproto/schema.sql`. Existing D1
+databases add `selected_chat_id` with
+`worker/migrations/0001_add_selected_chat_id.sql`.
+`RELAY_INPUT_URL` remains the protected HF playback URL template; the relay
+replaces its stream ID with the selected channel's stable TGTV ID.
+`RELAY_CHANNEL` remains `https://t.me/+-UyRaC_GVSw3NTU1`; output chat
+`4347395930` is configured separately only for source exclusion.
 
 After Render assigns the service URL, optionally set the Worker's
 `RELAY_ORIGIN` to that HTTPS origin and `RELAY_TOKEN` to the same admin token.

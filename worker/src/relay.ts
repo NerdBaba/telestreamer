@@ -9,6 +9,7 @@ interface RelayStatus {
   paused: boolean;
   forced: string | null;
   auto_start: boolean;
+  selected_chat_id: number | null;
   pending_reason: string | null;
   playout: { ready: boolean; source: string | null; pid?: number | null };
   publishing: { state: string; running: boolean };
@@ -26,6 +27,8 @@ interface RelayStatus {
     live: boolean;
     rtmp: boolean;
     scheduled: boolean;
+    stream_id: string;
+    preview_url?: string | null;
   }>;
   fixtures: Array<{ date: string; title: string }>;
 }
@@ -38,6 +41,24 @@ export async function relayStatus(env: RelayEnv): Promise<RelayStatus | null> {
   });
   if (!response.ok) throw new Error(`relay status HTTP ${response.status}`);
   return response.json<RelayStatus>();
+}
+
+/**
+ * Render's free plan stops a service after 15 minutes without inbound traffic,
+ * and a stopped relay cannot notice a live Turbo broadcast, so the scheduled
+ * trigger must generate traffic. `/healthz` is unauthenticated and reports
+ * configuration presence only, so this neither sends nor exposes a secret.
+ */
+export async function wakeRelay(env: RelayEnv): Promise<boolean> {
+  if (!env.RELAY_ORIGIN) return false;
+  try {
+    const response = await fetch(new URL('/healthz', env.RELAY_ORIGIN), {
+      signal: AbortSignal.timeout(15000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** Null means there is no reachable daemon; the caller can use official HLS. */
