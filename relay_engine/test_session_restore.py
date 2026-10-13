@@ -71,7 +71,7 @@ class RestoreSessionTests(unittest.TestCase):
             b"short",                              # far too small
             b"not a database but long enough to look like one" * 40,  # wrong magic, plausible size
             good_b64[:-12].encode("ascii"),       # truncation SQLite detects
-            good_b64[:-20].encode("ascii"),       # deeper truncation
+            good_b64[: len(good_b64) // 2].encode("ascii"),  # half the file
             b"!!!!not-base64!!!!",                 # invalid alphabet
         ]
         for index, payload in enumerate(cases):

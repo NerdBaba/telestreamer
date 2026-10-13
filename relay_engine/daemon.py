@@ -124,6 +124,7 @@ class Relay:
         self.publisher = None
         self.destination = None
         self.publishing = "blocked: Telegram session or RTMP destination required"
+        self.broadcasts: list[dict] = []
         self.last_error = None
         self.next_start = 0.0
         self.next_publish = 0.0
@@ -170,6 +171,7 @@ class Relay:
             "playout": {"source": self.current, "ready": self.ready(),
                         "url": "/live/index.m3u8", "pid": self.media.pid if self.media else None},
             "publishing": {"state": self.publishing, "running": self.push is not None and self.push.poll() is None},
+            "broadcasts": self.broadcasts,
             "last_error": self.last_error,
             "fixtures": [{"date": meeting.iso, "title": meeting.title} for meeting in self.meetings],
         }
@@ -197,6 +199,10 @@ class Relay:
                     decision = await asyncio.to_thread(sources.resolve, live, forced)
                     if forced == self.forced:
                         self.decision = decision
+                # Any channel the session is a member of is a candidate, so a
+                # new racing feed needs no redeploy. The relay's own output
+                # channel is excluded so it never restreams itself.
+                await self.refresh_discoveries(forced)
             except Exception as exc:
                 self.decision = {"chosen": None, "available": False,
                                  "reason": f"source check failed: {type(exc).__name__}", "sources": {}}
@@ -206,6 +212,55 @@ class Relay:
                 await asyncio.wait_for(self.recheck.wait(), float(self.config.get("poll_interval", 30)))
             except asyncio.TimeoutError:
                 pass
+
+    async def refresh_discoveries(self, forced: str | None) -> None:
+        """List the member channels and adopt a live one when none is pinned.
+
+        Discovery is advisory: an admin `forced` selection always wins, and a
+        pinned `input_url` is untouched. When nothing forces a source, a live
+        member channel is adopted so broadcasting starts on its own.
+        """
+        if forced:
+            return
+        session = self.session_path()
+        if session is None or not os.path.exists(session):
+            return
+        rows = await asyncio.to_thread(self._list_broadcasts, session)
+        self.broadcasts = rows
+        if not self.config.get("input_url") and not self.decision.get("available"):
+            picked = next((row for row in rows if row["live"]), None)
+            if picked:
+                self.decision = {
+                    "chosen": "turbosportslive",
+                    "available": True,
+                    "reason": f"live in {picked['title']}",
+                    "sources": {},
+                    "forced": False,
+                    "chat_id": picked["chat_id"],
+                }
+
+    def session_path(self) -> str | None:
+        target = str(self.config.get("session", "rrr_live"))
+        return target if target.endswith(".session") else target + ".session"
+
+    def _list_broadcasts(self, session: str) -> list[dict]:
+        """Enumerate member channels on a private thread; never publishes."""
+        from relay_engine import broadcasts
+        from telethon import TelegramClient
+
+        async def run():
+            client = TelegramClient(session, int(self.config.get("tg_api_id")
+                                     or os.environ.get("TG_API_ID", "0")),
+                                    str(self.config.get("tg_api_hash")
+                                        or os.environ.get("TG_API_HASH", "")))
+            await client.connect()
+            try:
+                return await broadcasts.discover_broadcasts(client)
+            finally:
+                await client.disconnect()
+
+        import asyncio
+        return asyncio.run(run())
 
     async def calendar(self) -> None:
         if self.config.get("input_url"):
