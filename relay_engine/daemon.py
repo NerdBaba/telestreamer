@@ -139,6 +139,8 @@ class Relay:
         self.publishing = "blocked: Telegram session or RTMP destination required"
         self.broadcasts: list[dict] = []
         self.next_discovery = 0.0
+        self.discovery_error: str | None = None
+        self.discovered_at = 0.0
         self.last_error = None
         self.next_start = 0.0
         self.next_publish = 0.0
@@ -186,6 +188,11 @@ class Relay:
                         "url": "/live/index.m3u8", "pid": self.media.pid if self.media else None},
             "publishing": {"state": self.publishing, "running": self.push is not None and self.push.poll() is None},
             "broadcasts": self.broadcasts,
+            "discovery": {
+                "enabled": bool(self.config.get("discover_channels")),
+                "error": self.discovery_error,
+                "last_found": self.discovered_at,
+            },
             "last_error": self.last_error,
             "fixtures": [{"date": meeting.iso, "title": meeting.title} for meeting in self.meetings],
         }
@@ -247,9 +254,17 @@ class Relay:
             self.config.get("discovery_interval", 120))
         session = self.session_path()
         if session is None or not os.path.exists(session):
+            self.discovery_error = "no restored Telegram session to discover from"
             return
-        rows = await asyncio.to_thread(self._list_broadcasts, session)
-        own = await asyncio.to_thread(self._own_channel_id, session)
+        try:
+            rows = await asyncio.to_thread(self._list_broadcasts, session)
+            own = await asyncio.to_thread(self._own_channel_id, session)
+        except Exception as exc:
+            # Surface it instead of silently reporting no channels.
+            self.discovery_error = f"{type(exc).__name__}: {exc}"
+            return
+        self.discovery_error = None
+        self.discovered_at = time.time()
         self.broadcasts = [
             row for row in rows
             if own is None or row["chat_id"] != own
