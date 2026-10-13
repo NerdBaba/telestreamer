@@ -12,7 +12,9 @@ type ControlAction =
   | { action: 'pause' | 'resume' | 'stop' }
   | { action: 'force'; source: 'rwitc' | 'turbosportslive' }
   | { action: 'auto' }
-  | { action: 'auto_start'; enabled: boolean };
+  | { action: 'auto_start'; enabled: boolean }
+  // Select one live broadcast from a member channel by its Telegram chat id.
+  | { action: 'select_channel'; chat_id: number };
 
 /** Control writes never carry the worker token to the browser. */
 export async function adminRelayControl(request: Request, env: RelayEnv): Promise<Response> {
@@ -36,6 +38,15 @@ export async function adminRelayControl(request: Request, env: RelayEnv): Promis
     } else if (candidate.action === 'auto_start') {
       if (typeof candidate.enabled !== 'boolean') throw new Error('bad enabled');
       body = { action: 'auto_start', enabled: candidate.enabled };
+    } else if (candidate.action === 'select_channel') {
+      // Broadcasts expose the raw positive entity.id, so the contract is a
+      // positive safe integer. Marked ids (-100…) and non-integers are never
+      // forwarded.
+      if (typeof candidate.chat_id !== 'number' || !Number.isSafeInteger(candidate.chat_id)
+          || candidate.chat_id <= 0) {
+        throw new Error('bad chat_id');
+      }
+      body = { action: 'select_channel', chat_id: candidate.chat_id };
     } else {
       throw new Error('bad action');
     }
@@ -104,6 +115,10 @@ th{color:var(--muted);font-weight:500;font-size:12px}
 <button id="pause">Pause</button><button id="resume">Resume</button><button id="stop">Stop</button>
 </div></section>
 
+<section><h2>Live sources from your channels</h2>
+<div id="sources"><p class="muted">Discovering channels you are a member of…</p></div>
+<p class="muted" style="margin:10px 0 0">Only channels you belong to are listed. Your own output channel is never shown. Choosing one to restream is not wired to the media input yet.</p></section>
+
 <section><h2>Source</h2>
 <div class="row">
 <button id="auto">Automatic (Turbo first)</button><button id="force-turbo">Turbo</button>
@@ -121,7 +136,8 @@ th{color:var(--muted);font-weight:500;font-size:12px}
 
 <script>
 const el = id => document.getElementById(id);
-const state = { paused: false, auto_start: true, forced: null, live: false, reason: '', source: null, fixtures: [] };
+const state = { paused: false, auto_start: true, forced: null, live: false, reason: '', source: null,
+                selected: null, broadcasts: [], fixtures: [] };
 
 async function call(path, options) {
   const response = await fetch(path, options);
@@ -139,6 +155,8 @@ async function refresh() {
     state.live = Boolean(status.playout && status.playout.ready);
     state.reason = status.decision && status.decision.reason;
     state.source = status.playout && status.playout.source;
+    state.broadcasts = Array.isArray(status.broadcasts) ? status.broadcasts : [];
+    state.selected = (status.decision && status.decision.chat_id) || null;
     state.fixtures = fixtures.meetings || [];
     render();
     el('log').textContent = 'Updated ' + new Date().toLocaleTimeString();
@@ -165,6 +183,27 @@ function render() {
       + state.fixtures.map(m => '<tr><td>' + m.date + '</td><td>'
         + (m.title || 'Racing').replace(/[<>&]/g, '') + '</td></tr>').join('') + '</table>'
     : '<p class="muted">No upcoming meetings in the calendar.</p>';
+  renderSources();
+}
+
+function renderSources() {
+  const rows = state.broadcasts || [];
+  if (!rows.length) {
+    el('sources').innerHTML = '<p class="muted">No member channels discovered yet.</p>';
+    return;
+  }
+  el('sources').innerHTML = '<table><tr><th>Channel</th><th>State</th><th></th></tr>' + rows.map(row => {
+    const title = String(row.title || 'Channel').replace(/[<>&]/g, '');
+    const stateLabel = row.live
+      ? '<span class="tag live">live</span>'
+      : row.scheduled ? '<span class="tag">scheduled</span>' : '<span class="tag">idle</span>';
+    // Selecting a channel is not wired to the media input yet, so the row is
+    // read-only. A live channel is shown so it can be seen, not chosen.
+    const action = row.live
+      ? '<span class="muted">restream not wired</span>'
+      : '<span class="muted">not live</span>';
+    return '<tr><td>' + title + '</td><td>' + stateLabel + '</td><td>' + action + '</td></tr>';
+  }).join('') + '</table>';
 }
 
 async function control(body) {

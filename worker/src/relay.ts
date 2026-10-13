@@ -10,8 +10,23 @@ interface RelayStatus {
   forced: string | null;
   auto_start: boolean;
   pending_reason: string | null;
-  playout: { ready: boolean; source: string | null };
-  decision: { available: boolean; reason: string; sources: Record<string, unknown> };
+  playout: { ready: boolean; source: string | null; pid?: number | null };
+  publishing: { state: string; running: boolean };
+  decision: {
+    available: boolean;
+    reason: string;
+    sources: Record<string, unknown>;
+    chat_id?: number | null;
+  };
+  // Every broadcast channel the relay can see, minus its own output.
+  broadcasts: Array<{
+    chat_id: number;
+    title: string;
+    username: string | null;
+    live: boolean;
+    rtmp: boolean;
+    scheduled: boolean;
+  }>;
   fixtures: Array<{ date: string; title: string }>;
 }
 

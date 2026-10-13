@@ -511,12 +511,20 @@ class Relay:
 
     async def control(self, body: dict) -> dict:
         action = body.get("action")
-        if action not in ("pause", "resume", "stop", "force", "auto", "auto_start"):
-            raise ValueError("action must be pause, resume, stop, force, auto, or auto_start")
+        if action not in ("pause", "resume", "stop", "force", "auto", "auto_start",
+                          "select_channel"):
+            raise ValueError("action must be pause, resume, stop, force, auto, "
+                             "auto_start, or select_channel")
         if action == "force" and body.get("source") not in ("rwitc", "turbosportslive"):
             raise ValueError("source must be rwitc or turbosportslive")
         if action == "auto_start" and not isinstance(body.get("enabled"), bool):
             raise ValueError("auto_start requires a boolean enabled field")
+        if action == "select_channel":
+            # Shape is validated first so a malformed body gets a precise error
+            # rather than the availability rejection below.
+            chat_id = body.get("chat_id")
+            if not isinstance(chat_id, int) or isinstance(chat_id, bool) or chat_id <= 0:
+                raise ValueError("select_channel requires a positive integer chat_id")
         async with self.control_lock:
             updated = {"paused": self.paused, "forced": self.forced, "auto_start": self.auto_start}
             if action in ("pause", "stop", "resume"):
@@ -541,6 +549,14 @@ class Relay:
             elif action == "auto":
                 self.forced = None
                 self.decision = dict(self.decision, chosen=None, available=False, reason="checking automatic source")
+            elif action == "select_channel":
+                # The media loop still feeds the configured input_url, so
+                # selecting a channel here would start the wrong feed. The
+                # action is rejected until the selected chat drives the input
+                # path; the list stays visible for status only.
+                raise ValueError(
+                    "selecting a member channel is not available yet: the media "
+                    "input still comes from the configured source")
             if action in ("force", "auto", "resume"):
                 self.recheck.set()
             if action == "stop" and self.publisher:
