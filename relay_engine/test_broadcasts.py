@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from relay_engine import broadcasts  # noqa: E402
+from relay_engine import broadcasts, daemon  # noqa: E402
 
 
 def channel(chat_id, title, username=None, call=None, **extra):
@@ -92,6 +94,88 @@ class DiscoveryTests(unittest.TestCase):
         entities = [channel(1, "Live one", call=call(rtmp=True)), channel(2, "Idle one")]
         rows = asyncio.run(broadcasts.live_broadcasts(client_for(entities)))
         self.assertEqual([row["chat_id"] for row in rows], [1])
+
+
+class DiscoveryExclusionTests(unittest.TestCase):
+    """The relay's own output channel must never be offered as a source."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name)
+        # session_path() resolves to <base>/<session>.session.
+        (self.base / "rrr_live.session").write_bytes(
+            b"SQLite format 3\x00" + b"\x00" * 2048)
+        self.rows = [
+            {"chat_id": 4347395930, "title": "RRR output", "username": None,
+             "live": False, "rtmp": False, "scheduled": False},
+            {"chat_id": 2961901881, "title": "Turbo", "username": "TurboSportsLive",
+             "live": True, "rtmp": True, "scheduled": False},
+        ]
+        # A live loop is required: Relay.__init__ captures the running loop and
+        # discovery schedules to_thread work on it.
+        self.loop = asyncio.new_event_loop()
+        self.ready = threading.Event()
+        self.stopped = threading.Event()
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+        self.thread.start()
+        self.assertTrue(self.ready.wait(5), "test loop did not start")
+
+    def tearDown(self):
+        self.loop.call_soon_threadsafe(self.stopped.set)
+        self.thread.join(timeout=10)
+
+    def _serve(self):
+        asyncio.set_event_loop(self.loop)
+
+        async def run():
+            self.ready.set()
+            while not self.stopped.is_set():
+                await asyncio.sleep(0.02)
+
+        self.loop.run_until_complete(run())
+        self.loop.run_until_complete(self.loop.shutdown_asyncgens())
+        self.loop.close()
+
+    def schedule(self, coroutine):
+        return asyncio.run_coroutine_threadsafe(coroutine, self.loop).result(10)
+
+    def relay(self, own):
+        async def build():
+            return daemon.Relay({
+                "admin_token": "t" * 32,
+                "state_path": str(self.base / "state.json"),
+                "session": "rrr_live",
+                "discover_channels": True,
+                "discovery_interval": 30,
+            }, self.base)
+        source = asyncio.run_coroutine_threadsafe(build(), self.loop).result(10)
+        source._list_broadcasts = lambda _session: self.rows
+        source._own_channel_id = lambda _session: own
+        source.decision = {"chosen": None, "available": False}
+        return source
+
+    def test_resolved_output_channel_is_excluded(self):
+        source = self.relay(4347395930)
+        self.schedule(source.refresh_discoveries(None))
+        self.assertEqual([row["title"] for row in source.broadcasts], ["Turbo"])
+        self.assertIsNone(source.discovery_error)
+
+    def test_unresolved_output_channel_publishes_no_sources(self):
+        # Failing open here would offer the relay's own channel as a source.
+        source = self.relay(None)
+        self.schedule(source.refresh_discoveries(None))
+        self.assertEqual(source.broadcasts, [])
+        self.assertIsNotNone(source.discovery_error)
+
+    def test_disabled_discovery_lists_nothing(self):
+        source = self.relay(4347395930)
+        source.config["discover_channels"] = False
+        self.schedule(source.refresh_discoveries(None))
+        self.assertEqual(source.broadcasts, [])
+
+    def schedule(self, coroutine):
+        return asyncio.run_coroutine_threadsafe(coroutine, self.loop).result(10)
 
 
 if __name__ == "__main__":

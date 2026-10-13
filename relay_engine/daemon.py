@@ -275,9 +275,16 @@ class Relay:
             return
         self.discovery_error = None
         self.discovered_at = time.time()
+        if own is None:
+            # The output channel could not be resolved, so no list is published.
+            # Failing open here would offer the relay's own channel as a
+            # source, which is the one thing that must never appear.
+            self.broadcasts = []
+            self.discovery_error = "output channel not resolved; no sources published"
+            return
         self.broadcasts = [
             row for row in rows
-            if own is None or row["chat_id"] != own
+            if row["chat_id"] != own
         ]
         if not self.config.get("input_url") and not self.decision.get("available"):
             picked = next((row for row in self.broadcasts if row["live"]), None)
