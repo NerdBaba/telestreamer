@@ -13,6 +13,7 @@ import hmac
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import signal
 import subprocess
@@ -27,6 +28,22 @@ from relay_engine.publishing import launch_publisher, media_environment
 from relay_engine.session_restore import restore_session
 
 WORKER = "https://rwitc-racing.kristopherreed0227-1etlk.workers.dev"
+
+
+def media_failure_detail(path: Path) -> str:
+    """Last line of a failed media process, with any long token redacted.
+
+    FFmpeg's error names the input playlist, which carries the Space path
+    secret, so the detail is redacted before it can reach a status document.
+    """
+    try:
+        text = path.read_text(errors="replace")
+    except OSError:
+        return ""
+    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return re.sub(r"[A-Za-z0-9_-]{32,}", "[redacted]", lines[-1])[:300]
 
 
 def save_private(path: Path, data: dict) -> None:
@@ -154,6 +171,7 @@ class Relay:
         self.desired = None
         self.media = None
         self.media_started = None
+        self.media_log = self.output.parent / "media.log"
         self.push = None
         self.current = None
         self.publisher = None
@@ -555,7 +573,11 @@ class Relay:
             if not selected:
                 return
             if self.media and self.media.poll() is not None:
-                self.last_error = f"media process exited ({self.media.returncode}); restarting"
+                detail = media_failure_detail(self.media_log)
+                self.last_error = (
+                    f"media process exited ({self.media.returncode}); restarting"
+                    + (f": {detail}" if detail else "")
+                )
                 await self.stop_media()
                 self.next_start = time.monotonic() + 3
             elif self.media:
@@ -584,9 +606,10 @@ class Relay:
                             "-hls_flags", "delete_segments+independent_segments+program_date_time+temp_file",
                             "-hls_start_number_source", "epoch_us", "-hls_segment_filename",
                             str(self.output / "%020d.ts"), str(self.output / "index.m3u8")]
-                self.media = subprocess.Popen(command, stdin=subprocess.DEVNULL,
-                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                               env=media_environment())
+                with open(self.media_log, "wb") as media_errors:
+                    self.media = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                                                  stdout=subprocess.DEVNULL, stderr=media_errors,
+                                                  env=media_environment())
                 self.media_started = time.monotonic()
                 self.current = selected
                 self.last_error = None

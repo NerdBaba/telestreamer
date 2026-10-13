@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, patch
 from relay_engine.telegram import TelegramAccessError
 
 
+from relay_engine import daemon
 from relay_engine.daemon import Relay
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -503,6 +504,26 @@ class DestinationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(relay.publishing, "idle")
             self.assertEqual(relay.last_error, "discarded an ended call")
             self.assertEqual(relay.next_publish, 0)
+
+class MediaDiagnosticTests(unittest.TestCase):
+    """A media crash must explain itself without exposing the private input URL."""
+
+    def test_detail_keeps_the_last_line_and_redacts_long_tokens(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "media.log"
+            log.write_text(
+                "frame= 1 fps=0.0\n"
+                "https://space.example/p/" + "a" * 96 + "/streams/2631340b81ae/play.m3u8: "
+                "Server returned 404 Not Found\n"
+            )
+            detail = daemon.media_failure_detail(log)
+            self.assertIn("404 Not Found", detail)
+            self.assertNotIn("a" * 96, detail)
+
+    def test_detail_is_empty_without_a_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(daemon.media_failure_detail(Path(directory) / "missing.log"), "")
+
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg required for media replay")
 class RelayStartupTests(unittest.IsolatedAsyncioTestCase):
