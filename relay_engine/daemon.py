@@ -92,6 +92,16 @@ def load_config(raw_path: str | None) -> tuple[dict, Path]:
         # The container filesystem is empty; the authorized session must be
         # restored from a private secret before any publishing is attempted.
         config["session"] = str(restore_session(config, base))
+        # Render only reads render.yaml when a service is created, so these
+        # defaults are baked in rather than relying on variables that an
+        # existing service never received.
+        config.setdefault("host", "0.0.0.0")
+        config.setdefault("media_mode", "copy")
+        config.setdefault("discover_channels", True)
+        config.setdefault("discovery_interval", 120)
+        # A public invite link, not a secret: it survives a channel rename and
+        # resolves through the dialogs the session already knows.
+        config.setdefault("channel", "https://t.me/+-UyRaC_GVSw3NTU1")
     if not isinstance(config.get("admin_token"), str) or len(config["admin_token"]) < 16:
         raise ValueError("an admin token of at least 16 characters is required")
     config.setdefault("worker_url", WORKER)
