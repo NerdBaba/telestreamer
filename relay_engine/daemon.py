@@ -333,6 +333,10 @@ class Relay:
                 self.desired = selected
                 await self.stop_media()
                 self.next_start = 0
+            # The Telegram destination is resolved before any source is live,
+            # so the RTMP credentials and channel are ready the moment a
+            # broadcast starts instead of being fetched during the start.
+            await self.resolve_destination()
             if not selected:
                 return
             if self.media and self.media.poll() is not None:
@@ -373,7 +377,6 @@ class Relay:
                 self.last_error = None
             if not self.ready():
                 return
-            await self.resolve_destination()
             if self.push and self.push.poll() is not None:
                 self.last_error = f"publishing process exited ({self.push.returncode}); reconnecting"
                 await self.terminate(self.push)

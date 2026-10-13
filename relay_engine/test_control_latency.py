@@ -88,6 +88,22 @@ class RelayLoopTests(unittest.TestCase):
         self.assertTrue(relay.paused)
         self.assertLess(time.monotonic() - started, 5, "control waited behind a media cycle")
 
+    def test_destination_resolves_even_while_no_source_is_live(self):
+        # Telegram credentials must be fetched before a broadcast starts, or
+        # the first minutes of a race are spent resolving them.
+        relay = self.relay()
+        relay.decision = {"chosen": None, "available": False,
+                          "reason": "no source", "sources": {}}
+        calls = []
+
+        async def spy():
+            calls.append("resolved")
+
+        relay.resolve_destination = spy
+        self.schedule(relay.reconcile())
+        self.assertEqual(calls, ["resolved"],
+                         "destination must resolve while every source is offline")
+
     def test_pause_applies_while_media_is_idle(self):
         relay = self.relay()
         result = self.schedule(relay.control({"action": "pause"}))
