@@ -464,11 +464,14 @@ class Relay:
             self.publishing = "ready"
         except Exception as exc:
             self.publishing = f"blocked: {type(exc).__name__}"
-            self.last_error = (
-                f"destination blocked: {exc}"
-                if type(exc).__name__ == "TelegramAccessError"
-                else f"destination resolution failed: {type(exc).__name__}"
-            )
+            seconds = getattr(exc, "seconds", None)
+            if type(exc).__name__ == "FloodWaitError" and type(seconds) is int and seconds > 0:
+                self.next_publish = time.monotonic() + seconds
+                self.last_error = f"destination retry delayed by Telegram flood wait ({seconds} seconds)"
+            elif type(exc).__name__ == "TelegramAccessError":
+                self.last_error = f"destination blocked: {exc}"
+            else:
+                self.last_error = f"destination resolution failed: {type(exc).__name__}"
             if self.publisher:
                 with contextlib.suppress(Exception):
                     await self.publisher.close()

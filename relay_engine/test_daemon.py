@@ -438,6 +438,31 @@ class DestinationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(relay.last_error, "destination resolution failed: RuntimeError")
             self.assertNotIn("private-token", relay.last_error)
 
+    async def test_destination_flood_wait_delays_next_retry(self):
+        class FloodWaitError(RuntimeError):
+            seconds = 90
+
+        with tempfile.TemporaryDirectory() as directory:
+            relay = Relay({
+                "admin_token": "isolated-destination-token",
+                "tg_api_id": 1,
+                "tg_api_hash": "isolated-api-hash",
+            }, Path(directory))
+            publisher = SimpleNamespace(
+                connect=AsyncMock(side_effect=FloodWaitError("retry after 90")),
+                close=AsyncMock(),
+            )
+            before = time.monotonic()
+
+            with patch("relay_engine.telegram.TelegramPublisher", return_value=publisher):
+                await relay.resolve_destination()
+
+            self.assertGreaterEqual(relay.next_publish, before + 89)
+            self.assertEqual(
+                relay.last_error,
+                "destination retry delayed by Telegram flood wait (90 seconds)",
+            )
+
 @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg required for media replay")
 class RelayStartupTests(unittest.IsolatedAsyncioTestCase):
     async def test_alive_media_without_first_playlist_has_finite_startup_timeout(self):
