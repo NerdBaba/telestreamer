@@ -46,7 +46,8 @@ def load_config(raw_path: str | None) -> tuple[dict, Path]:
         "ADMIN_TOKEN": "admin_token", "RTMP_URL": "rtmp_url", "RTMP_KEY": "rtmp_key",
         "WORKER_URL": "worker_url", "RELAY_STATE_URL": "state_url",
         "RELAY_MEDIA_MODE": "media_mode", "RELAY_HOST": "host", "PORT": "port",
-        "RELAY_INPUT_URL": "input_url",
+        "RELAY_INPUT_URL": "input_url", "RELAY_DISCOVER_CHANNELS": "discover_channels",
+        "RELAY_DISCOVERY_INTERVAL": "discovery_interval",
     }
     render = os.environ.get("RENDER", "").lower() == "true"
     environment_only = raw_path is None and (
@@ -68,6 +69,18 @@ def load_config(raw_path: str | None) -> tuple[dict, Path]:
     for name, key in variables.items():
         if name in os.environ:
             config[key] = os.environ[name]
+    if "RELAY_DISCOVER_CHANNELS" in os.environ:
+        value = os.environ["RELAY_DISCOVER_CHANNELS"].lower()
+        if value not in ("true", "false", "1", "0"):
+            raise ValueError("RELAY_DISCOVER_CHANNELS must be true or false")
+        config["discover_channels"] = value in ("true", "1")
+    if "RELAY_DISCOVERY_INTERVAL" in os.environ:
+        try:
+            config["discovery_interval"] = float(os.environ["RELAY_DISCOVERY_INTERVAL"])
+        except ValueError:
+            raise ValueError("RELAY_DISCOVERY_INTERVAL must be a number") from None
+        if config["discovery_interval"] < 30:
+            raise ValueError("RELAY_DISCOVERY_INTERVAL must be at least 30 seconds")
     if "RELAY_LOOP_INPUT" in os.environ:
         value = os.environ["RELAY_LOOP_INPUT"].lower()
         if value not in ("true", "false", "1", "0"):
@@ -125,6 +138,7 @@ class Relay:
         self.destination = None
         self.publishing = "blocked: Telegram session or RTMP destination required"
         self.broadcasts: list[dict] = []
+        self.next_discovery = 0.0
         self.last_error = None
         self.next_start = 0.0
         self.next_publish = 0.0
@@ -201,7 +215,9 @@ class Relay:
                         self.decision = decision
                 # Any channel the session is a member of is a candidate, so a
                 # new racing feed needs no redeploy. The relay's own output
-                # channel is excluded so it never restreams itself.
+                # channel is excluded so it never restreams itself. Opt-in
+                # only, and rate-limited, because each pass connects to
+                # Telegram.
                 await self.refresh_discoveries(forced)
             except Exception as exc:
                 self.decision = {"chosen": None, "available": False,
@@ -216,12 +232,18 @@ class Relay:
     async def refresh_discoveries(self, forced: str | None) -> None:
         """List the member channels and adopt a live one when none is pinned.
 
-        Discovery is advisory: an admin `forced` selection always wins, and a
-        pinned `input_url` is untouched. When nothing forces a source, a live
-        member channel is adopted so broadcasting starts on its own.
+        Discovery is opt-in because each pass opens a Telegram connection, and
+        it is rate-limited by ``discovery_interval`` so a busy media loop does
+        not reconnect constantly. An admin ``forced`` selection always wins, a
+        pinned ``input_url`` is untouched, and the relay's own output channel is
+        excluded so it never restreams itself.
         """
-        if forced:
+        if forced or not self.config.get("discover_channels"):
             return
+        if time.monotonic() < self.next_discovery:
+            return
+        self.next_discovery = time.monotonic() + float(
+            self.config.get("discovery_interval", 120))
         session = self.session_path()
         if session is None or not os.path.exists(session):
             return

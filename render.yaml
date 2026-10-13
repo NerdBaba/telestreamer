@@ -31,6 +31,13 @@ services:
         value: 0.0.0.0
       - key: RENDER
         value: "true"
+      # Adopt any live broadcast from a channel the session belongs to, so a
+      # new racing feed needs no redeploy. The relay's own output channel is
+      # never restreamed back into itself.
+      - key: RELAY_DISCOVER_CHANNELS
+        value: "true"
+      - key: RELAY_DISCOVERY_INTERVAL
+        value: "120"
       # The playback token in this URL is a secret: sync:false makes Render
       # prompt for it at deploy time instead of storing it in this file.
       - key: RELAY_INPUT_URL
