@@ -58,6 +58,22 @@ rights, calls `GetGroupCallStreamRtmpUrl`, and creates an RTMP call only if
 none exists. An existing non-RTMP or scheduled call is never replaced, and only
 a call this relay created is discarded on stop.
 
+A channel holds one call at a time, so an ended or non-RTMP call left behind by
+an earlier broadcast blocks every new one; Telegram reported it as
+`rtmp=False, participants=0`. The status document names that condition, and the
+panel then offers **Clear ended output call**, which discards a call only when
+it has no participants and no RTMP stream. That action is always operator
+initiated: a live or scheduled broadcast is never replaced automatically.
+
+### Capture routes the panel depends on
+
+Both **Preview stream** and **Start restream** require the Space to serve
+`/p/<PATH_SECRET>/watch/<stream_id>` and
+`/p/<PATH_SECRET>/streams/<stream_id>/play.m3u8`. A deployment that answers 404
+for those routes can still list channels in `playlist.m3u`, so a live row does
+not prove that its media is being captured. Verify the two routes before
+treating a member-channel failure as a relay fault.
+
 ### Admin panel
 Secret URL, not a searchable path:
 

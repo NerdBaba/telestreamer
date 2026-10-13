@@ -4,15 +4,19 @@ interface RelayState {
   paused: boolean;
   forced: null | 'rwitc' | 'turbosportslive';
   auto_start: boolean;
+  selected_chat_id: number | null;
 }
 
 function validState(value: unknown): value is RelayState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const state = value as Record<string, unknown>;
-  return Object.keys(state).length === 3 && typeof state.paused === 'boolean'
+  return Object.keys(state).length === 4 && typeof state.paused === 'boolean'
     && typeof state.auto_start === 'boolean'
     && Object.hasOwn(state, 'forced')
-    && (state.forced === null || state.forced === 'rwitc' || state.forced === 'turbosportslive');
+    && (state.forced === null || state.forced === 'rwitc' || state.forced === 'turbosportslive')
+    && (state.selected_chat_id === null
+      || (typeof state.selected_chat_id === 'number'
+        && Number.isSafeInteger(state.selected_chat_id) && state.selected_chat_id > 0));
 }
 
 export async function handleRelayState(request: Request, env: TelegramEnv): Promise<Response> {
@@ -58,7 +62,10 @@ export async function handleRelayState(request: Request, env: TelegramEnv): Prom
       for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
       const parsed: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes));
       if (!validState(parsed)) throw new Error('invalid state');
-      state = { paused: parsed.paused, forced: parsed.forced, auto_start: parsed.auto_start };
+      state = {
+        paused: parsed.paused, forced: parsed.forced, auto_start: parsed.auto_start,
+        selected_chat_id: parsed.selected_chat_id,
+      };
     } catch {
       return Response.json({ error: 'invalid_state' }, { status: 400, headers });
     } finally { reader?.releaseLock(); }
@@ -66,18 +73,28 @@ export async function handleRelayState(request: Request, env: TelegramEnv): Prom
   try {
     const db = env.DB.withSession('first-primary');
     if (state) {
-      await db.prepare(`INSERT INTO relay_state (id, paused, forced, auto_start, updated_at) VALUES (?, ?, ?, ?, ?)
+      await db.prepare(`INSERT INTO relay_state
+        (id, paused, forced, auto_start, selected_chat_id, updated_at) VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET paused = excluded.paused, forced = excluded.forced,
-          auto_start = excluded.auto_start, updated_at = excluded.updated_at`)
-        .bind('primary', state.paused ? 1 : 0, state.forced, state.auto_start ? 1 : 0, Date.now()).run();
+          auto_start = excluded.auto_start, selected_chat_id = excluded.selected_chat_id,
+          updated_at = excluded.updated_at`)
+        .bind('primary', state.paused ? 1 : 0, state.forced, state.auto_start ? 1 : 0,
+          state.selected_chat_id, Date.now()).run();
       return Response.json(state, { headers });
     }
-    const row = await db.prepare('SELECT paused, forced, auto_start FROM relay_state WHERE id = ?')
-      .bind('primary').first<{ paused: number; forced: unknown; auto_start: number }>();
-    if (!row) return Response.json({ paused: false, forced: null, auto_start: true }, { headers });
+    const row = await db.prepare(
+      'SELECT paused, forced, auto_start, selected_chat_id FROM relay_state WHERE id = ?',
+    ).bind('primary')
+      .first<{ paused: number; forced: unknown; auto_start: number; selected_chat_id: number | null }>();
+    if (!row) {
+      return Response.json({ paused: false, forced: null, auto_start: true, selected_chat_id: null }, { headers });
+    }
     if (row.paused !== 0 && row.paused !== 1) throw new Error('invalid stored state');
     if (row.auto_start !== 0 && row.auto_start !== 1) throw new Error('invalid stored state');
-    const loaded = { paused: row.paused === 1, forced: row.forced, auto_start: row.auto_start === 1 };
+    const loaded = {
+      paused: row.paused === 1, forced: row.forced, auto_start: row.auto_start === 1,
+      selected_chat_id: row.selected_chat_id,
+    };
     if (!validState(loaded)) throw new Error('invalid stored state');
     return Response.json(loaded, { headers });
   } catch {

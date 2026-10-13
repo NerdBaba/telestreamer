@@ -2,17 +2,21 @@
 
 **Origin:** https://rwitc-racing.kristopherreed0227-1etlk.workers.dev
 
-**Verified deployment:** `1f48abbe-f7d4-4736-b96d-27156ac265f3`
+**Verified deployment:** `196c77b7-c86b-4dff-b056-b1d0ad94ea04` — member-channel
+control room with ended-call release, 2026-10-13.
 
 **D1:** `rwitc-telegram`, database `d9010546-1b5c-45cd-b901-3c3308654b33`.
-Schema applied remotely. The primary row is present and empty; no authorized
-Telegram account is stored yet. Admin and session-encryption secrets are set.
-Telegram API credentials are still absent.
+Schema applied remotely, including migration `0001_add_selected_chat_id.sql`
+(`relay_state.selected_chat_id`, verified present by `PRAGMA table_info`). The
+primary row is present; no authorized Telegram account is stored yet. Admin and
+session-encryption secrets are set, and the relay origin/token bindings are set
+to the private Render relay.
 
 ## Observed verification
 
 | Path | Observed result |
 |---|---|
+| Production `/healthz` after latest deployment | 200, `{"ok":true,"date":"2026-10-13"}` |
 | Public `/live` | FFmpeg decoded five seconds, exit 0 |
 | Public `/api/stream-status` | `source: rwitc`, `live: true`, lag approximately 4 seconds at observation |
 | Public `/api/fixtures` | 200, upcoming meetings with invalid placeholder dates removed |
@@ -26,20 +30,30 @@ Telegram API credentials are still absent.
 | Local daemon → HLS → private-pipe native sender → RTMP receiver | h264 + aac, 5.24 seconds received and decoded |
 | Local Worker → daemon → HLS | Real decoded media; pause preserved as 503 rather than bypassed with fallback |
 | Python checks | 20 offline checks plus 12 publisher/recovery tests passed, including video-only RTMP |
-| Worker checks | Typecheck and 34 player-rotation/protocol/login/SRP/relay tests passed |
+| Worker checks for this deploy | Typecheck passed; all 48 Worker tests passed |
+| Private admin `…/status` against the live Render relay | 200 with real broadcasts, `auto_start: true`, `paused: false` |
+| Relay `publishing` after clearing an ended output call | `ready` — genuine Telegram RTMP credentials obtained |
+| Relay selection of a live member channel | Selection recorded and media started; the Space answered 404 for that stream's HLS, so no media was produced |
+| Worker `scheduled` trigger | Reaches the relay `/healthz`, which is what stops Render Free from spinning down |
 
 These observations do **not** establish a native Telegram broadcast, completed
 OTP/2FA login, or authorized-session persistence. Those require user credentials.
 Native Turbo media extraction also remains blocked on authenticated chunk
 samples. The public preview detector is not a substitute for decoded media.
+A live row in the Space playlist does not prove that its media is captured; the
+Space must answer both `/watch/<id>` and `/streams/<id>/play.m3u8`.
 
 ## Configuration behavior
 
 - `/api/live` resolves published player HTML and re-signs playlist/segment
   requests. CDN token paths survive relative URL resolution.
 - `/live` uses a configured reachable daemon even when its decision is 503;
-  only an absent/unreachable daemon permits official fallback. There is
-  currently no public `RELAY_ORIGIN`; production therefore uses official HLS.
+  only an absent/unreachable daemon permits official fallback. `RELAY_ORIGIN`
+  is now set to the private Render relay.
+- The private admin panel needs a reachable `RELAY_ORIGIN` and matching
+  `RELAY_TOKEN`; both are set, and real source selection is exercised against
+  the live relay. Publishing was blocked until an ended output call was cleared,
+  which the panel now reports and can discard.
 - The calendar endpoint needs a User-Agent. An explicit descriptive agent fixed
   the observed upstream 403/Worker 502 failure.
 - Telegram login routes are bearer-protected; session payloads are AES-GCM
