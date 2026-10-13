@@ -99,9 +99,10 @@ def load_config(raw_path: str | None) -> tuple[dict, Path]:
         config.setdefault("media_mode", "copy")
         config.setdefault("discover_channels", True)
         config.setdefault("discovery_interval", 120)
-        # A public invite link, not a secret: it survives a channel rename and
-        # resolves through the dialogs the session already knows.
-        config.setdefault("channel", "https://t.me/+-UyRaC_GVSw3NTU1")
+        # The output channel is pinned by numeric id: it resolves from the
+        # session's local cache with no network call, so discovery never has to
+        # look up an invite. A rename cannot invalidate it either.
+        config.setdefault("channel", "4347395930")
     if not isinstance(config.get("admin_token"), str) or len(config["admin_token"]) < 16:
         raise ValueError("an admin token of at least 16 characters is required")
     config.setdefault("worker_url", WORKER)
@@ -151,6 +152,7 @@ class Relay:
         self.next_discovery = 0.0
         self.discovery_error: str | None = None
         self.discovered_at = 0.0
+        self._own_chat_id: int | None = None
         self.last_error = None
         self.next_start = 0.0
         self.next_publish = 0.0
@@ -312,7 +314,14 @@ class Relay:
         return self._with_telegram(session, run)
 
     def _own_channel_id(self, session: str) -> int | None:
-        """The relay's own output channel, so it is never listed as a source."""
+        """The relay's own output channel, so it is never listed as a source.
+
+        The id is resolved once and cached: re-resolving through an invite or
+        username on every discovery pass creates needless Telegram traffic and
+        eventually a flood wait, which would then suppress discovery entirely.
+        """
+        if self._own_chat_id is not None:
+            return self._own_chat_id
         from relay_engine import telegram
 
         target = self.config.get("channel")
@@ -321,12 +330,20 @@ class Relay:
 
         async def run(client):
             try:
-                entity, _ = await telegram.resolve_channel(client, target)
+                # A numeric id resolves from the local cache without any
+                # network call, which is what avoids repeated invite lookups.
+                if isinstance(target, str) and target.lstrip("-").isdigit():
+                    entity = await client.get_entity(int(target))
+                else:
+                    entity, _ = await telegram.resolve_channel(client, target)
                 return entity.id
             except Exception:
                 return None
 
-        return self._with_telegram(session, run)
+        resolved = self._with_telegram(session, run)
+        if resolved is not None:
+            self._own_chat_id = resolved
+        return resolved
 
     def _with_telegram(self, session: str, operation):
         """Run one authorized Telegram call on a private thread, then disconnect."""
