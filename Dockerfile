@@ -12,6 +12,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certi
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 relay
 WORKDIR /app
+# Telethon is the MTProto client used for both channel discovery and RTMP
+# publishing. Pin it so a rebuild is reproducible.
+RUN pip install --no-cache-dir "telethon==1.45.0"
 COPY --chown=relay:relay relay_engine ./relay_engine
 COPY --chown=relay:relay rwitc_live.py ./rwitc_live.py
 RUN mkdir -p /app/.relay/runtime && chown relay:relay /app \
