@@ -42,3 +42,7 @@ services:
       # prompt for it at deploy time instead of storing it in this file.
       - key: RELAY_INPUT_URL
         sync: false
+      # The restream target. Public channel username; no invite hash, so a
+      # rotated invite never breaks the relay.
+      - key: RELAY_CHANNEL
+        value: "https://t.me/+-UyRaC_GVSw3NTU1"

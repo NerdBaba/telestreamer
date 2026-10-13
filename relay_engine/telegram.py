@@ -62,7 +62,7 @@ async def resolve_channel(client, target: str):
     """
     from telethon.errors import (
         ChannelPrivateError, InviteHashEmptyError, InviteHashExpiredError,
-        InviteHashInvalidError,
+        InviteHashInvalidError, UsernameInvalidError, UsernameNotOccupiedError,
     )
     from telethon.tl.functions.messages import CheckChatInviteRequest
     from telethon.tl.types import Channel, ChatInviteAlready
@@ -108,7 +108,21 @@ async def resolve_channel(client, target: str):
         value = parsed.path.strip("/")
     value = value.lstrip("@")
     lookup = int(value) if value.lstrip("-").isdigit() else value
-    return await _full_channel(client, await client.get_entity(lookup))
+    try:
+        return await _full_channel(client, await client.get_entity(lookup))
+    except (UsernameInvalidError, UsernameNotOccupiedError, ValueError):
+        # A channel can be renamed, so a username is not a durable target.
+        # A numeric id or an invite hash is. Fall back to the dialogs the
+        # session already knows, matched by exact channel id.
+        if not isinstance(lookup, int):
+            raise
+        async for dialogue in client.iter_dialogs():
+            entity = dialogue.entity
+            if isinstance(entity, Channel) and entity.id == lookup:
+                return await _full_channel(client, entity)
+        raise TelegramAccessError(
+            f"The session is not a member of channel {lookup}; join it in Telegram first."
+        ) from None
 
 
 class TelegramPublisher:

@@ -47,7 +47,7 @@ def load_config(raw_path: str | None) -> tuple[dict, Path]:
         "WORKER_URL": "worker_url", "RELAY_STATE_URL": "state_url",
         "RELAY_MEDIA_MODE": "media_mode", "RELAY_HOST": "host", "PORT": "port",
         "RELAY_INPUT_URL": "input_url", "RELAY_DISCOVER_CHANNELS": "discover_channels",
-        "RELAY_DISCOVERY_INTERVAL": "discovery_interval",
+        "RELAY_DISCOVERY_INTERVAL": "discovery_interval", "RELAY_CHANNEL": "channel",
     }
     render = os.environ.get("RENDER", "").lower() == "true"
     environment_only = raw_path is None and (
@@ -234,9 +234,10 @@ class Relay:
 
         Discovery is opt-in because each pass opens a Telegram connection, and
         it is rate-limited by ``discovery_interval`` so a busy media loop does
-        not reconnect constantly. An admin ``forced`` selection always wins, a
-        pinned ``input_url`` is untouched, and the relay's own output channel is
-        excluded so it never restreams itself.
+        not reconnect constantly. The relay's own output channel is excluded
+        from the list, so it never appears as a source it could restream into
+        itself. An admin ``forced`` selection always wins and a pinned
+        ``input_url`` is untouched.
         """
         if forced or not self.config.get("discover_channels"):
             return
@@ -248,9 +249,13 @@ class Relay:
         if session is None or not os.path.exists(session):
             return
         rows = await asyncio.to_thread(self._list_broadcasts, session)
-        self.broadcasts = rows
+        own = await asyncio.to_thread(self._own_channel_id, session)
+        self.broadcasts = [
+            row for row in rows
+            if own is None or row["chat_id"] != own
+        ]
         if not self.config.get("input_url") and not self.decision.get("available"):
-            picked = next((row for row in rows if row["live"]), None)
+            picked = next((row for row in self.broadcasts if row["live"]), None)
             if picked:
                 self.decision = {
                     "chosen": "turbosportslive",
@@ -268,16 +273,41 @@ class Relay:
     def _list_broadcasts(self, session: str) -> list[dict]:
         """Enumerate member channels on a private thread; never publishes."""
         from relay_engine import broadcasts
+
+        async def run(client):
+            return await broadcasts.discover_broadcasts(client)
+
+        return self._with_telegram(session, run)
+
+    def _own_channel_id(self, session: str) -> int | None:
+        """The relay's own output channel, so it is never listed as a source."""
+        from relay_engine import telegram
+
+        target = self.config.get("channel")
+        if not target:
+            return None
+
+        async def run(client):
+            try:
+                entity, _ = await telegram.resolve_channel(client, target)
+                return entity.id
+            except Exception:
+                return None
+
+        return self._with_telegram(session, run)
+
+    def _with_telegram(self, session: str, operation):
+        """Run one authorized Telegram call on a private thread, then disconnect."""
         from telethon import TelegramClient
 
         async def run():
-            client = TelegramClient(session, int(self.config.get("tg_api_id")
-                                     or os.environ.get("TG_API_ID", "0")),
-                                    str(self.config.get("tg_api_hash")
-                                        or os.environ.get("TG_API_HASH", "")))
+            client = TelegramClient(
+                session,
+                int(self.config.get("tg_api_id") or os.environ.get("TG_API_ID", "0")),
+                str(self.config.get("tg_api_hash") or os.environ.get("TG_API_HASH", "")))
             await client.connect()
             try:
-                return await broadcasts.discover_broadcasts(client)
+                return await operation(client)
             finally:
                 await client.disconnect()
 
