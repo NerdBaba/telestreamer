@@ -19,12 +19,15 @@ interface RelayStatus {
     sources: Record<string, unknown>;
     chat_id?: number | null;
   };
-  // Every broadcast channel the relay can see, minus its own output.
+  // Every chat the relay can see with a call, minus its own output.
   broadcasts: Array<{
     chat_id: number;
     title: string;
     username: string | null;
     live: boolean;
+    /** Telegram reports the call; the capture host may not serve it yet. */
+    capturable?: boolean;
+    telegram_live?: boolean;
     rtmp: boolean;
     scheduled: boolean;
     stream_id: string;

@@ -101,7 +101,7 @@ button,a{font:inherit}button{cursor:pointer}button:disabled{cursor:wait;opacity:
 <div class="shell"><header class="masthead"><div><p class="eyebrow">Private control room</p><h1>Live stream relay</h1><p>Select a verified member-channel broadcast, preview it, then start the restream to your configured output.</p></div><p class="secure">Private admin session</p></header>
 <main id="main" class="workspace">
 <section class="panel status-panel" aria-labelledby="status-heading"><div class="panel-head"><div><p class="eyebrow">Relay status</p><h2 id="status-heading">Current playout</h2></div><p class="status-line"><span class="signal" id="signal" aria-hidden="true"></span><span id="live">Checking relay</span></p></div><p class="status-title" id="source">No source selected</p><p class="reason" id="reason">Checking relay and live sources.</p><dl class="summary"><div><dt>Selected stream</dt><dd id="selected-summary">None</dd></div><div><dt>Auto-start</dt><dd id="autostart-summary">Checking</dd></div></dl><div class="button-row" aria-label="Playout controls"><button id="resume" class="primary" type="button">Resume playout</button><button id="pause" type="button">Pause playout</button><button id="stop" class="danger" type="button">Stop relay</button><button id="release" type="button" hidden>Clear ended output call</button></div></section>
-<section class="panel sources-panel" aria-labelledby="sources-heading"><div class="panel-head"><div><p class="eyebrow">Choose a stream</p><h2 id="sources-heading">Live member channels</h2><p class="help">Only channels confirmed live by Hugging Face are shown. Your output channel is excluded.</p></div></div><div id="sources" class="sources" aria-live="polite"><div class="skeleton" aria-label="Checking live member channels"></div></div></section>
+<section class="panel sources-panel" aria-labelledby="sources-heading"><div class="panel-head"><div><p class="eyebrow">Choose a stream</p><h2 id="sources-heading">Live member chat</h2><p class="help">Every channel or group you belong to that Telegram reports as livestreaming. Your output channel is excluded.</p></div></div><div id="sources" class="sources" aria-live="polite"><div class="skeleton" aria-label="Checking live member channels"></div></div></section>
 <section class="panel" aria-labelledby="settings-heading"><div class="panel-head"><div><p class="eyebrow">Playback settings</p><h2 id="settings-heading">Fallback behavior</h2></div></div><div class="settings-grid"><div class="setting"><h3>Automatic source</h3><p>Use the configured priority when you have not selected a member stream.</p><div class="choice-grid" aria-label="Fallback source"><button id="auto" class="choice" type="button">Automatic</button><button id="force-turbo" class="choice" type="button">Turbo</button><button id="force-rwitc" class="choice" type="button">Official stream</button></div></div><div class="setting"><h3>Start behavior</h3><p>When auto-start is off, selecting a live member stream still starts that stream.</p><button id="autostart" type="button">Checking auto-start</button></div></div></section>
 <section class="panel" aria-labelledby="fixtures-heading"><div class="panel-head"><div><p class="eyebrow">Race calendar</p><h2 id="fixtures-heading">Upcoming fixtures</h2></div></div><div id="fixtures"><p class="empty">Loading upcoming fixtures.</p></div></section>
 <section class="panel" aria-labelledby="activity-heading"><p class="eyebrow">Activity</p><h2 id="activity-heading">Connection log</h2><p class="activity" id="activity" role="status" aria-live="polite">Checking relay.</p></section>
@@ -170,7 +170,7 @@ function renderSources() {
     return;
   }
   if (!rows.length) {
-    el('sources').innerHTML = '<div class="empty"><strong>No verified live streams</strong>Member channels appear here as soon as their Hugging Face stream is live.</div>';
+    el('sources').innerHTML = '<div class="empty"><strong>Nothing is livestreaming</strong>Chats you belong to appear here as soon as Telegram reports them live.</div>';
     return;
   }
   el('sources').innerHTML = rows.map(row => {
@@ -180,7 +180,9 @@ function renderSources() {
     const canStart = preview && Number.isSafeInteger(chatId) && chatId > 0;
     const actions = canStart
       ? '<div class="stream-actions"><a class="button-link" href="' + escapeHtml(preview) + '" target="_blank" rel="noopener noreferrer">Preview stream</a><button class="primary" type="button" data-chat-id="' + chatId + '">Start restream</button></div>'
-      : '<p class="help">Preview is preparing. Refresh in a moment.</p>';
+      // Live in Telegram but the capture host has no stream for it yet, so
+      // there is nothing to preview or restream until it does.
+      : '<p class="help">Waiting for the capture host to publish this stream.</p>';
     return '<article class="stream-card' + (selected ? ' selected' : '') + '"><div><h3 class="stream-title">' + escapeHtml(row.title || 'Channel') + '</h3><p class="stream-meta"><span class="badge">Live now</span>' + (selected ? '<span class="badge selected">Selected</span>' : '') + '</p></div>' + actions + '</article>';
   }).join('');
   for (const button of el('sources').querySelectorAll('button[data-chat-id]')) {
