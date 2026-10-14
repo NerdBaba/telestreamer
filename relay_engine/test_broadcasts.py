@@ -62,6 +62,19 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual([row["live"] for row in rows], [True, False, False])
         self.assertEqual(rows[0]["rtmp"], True)
 
+    def test_group_live_streams_are_listed(self):
+        # A live stream or video chat runs in megagroups too, so restricting
+        # discovery to broadcast channels hid every group the session belongs to.
+        rows = self.discover([
+            channel(1, "Broadcast live", call=call(rtmp=True)),
+            SimpleNamespace(id=2, title="Community group", broadcast=False, megagroup=True),
+            SimpleNamespace(id=3, title="Group live", broadcast=False, megagroup=True, call=call(rtmp=True)),
+            SimpleNamespace(id=4, title="Basic group", broadcast=False, megagroup=False),
+            SimpleNamespace(id=5, title="Saved messages", broadcast=False),
+        ])
+        self.assertEqual([row["chat_id"] for row in rows], [1, 3, 2])
+        self.assertEqual([row["live"] for row in rows], [True, True, False])
+
     def test_live_channels_are_reported_first(self):
         rows = self.discover([
             channel(2, "Zulu offline"),
@@ -177,7 +190,7 @@ class DiscoveryExclusionTests(unittest.TestCase):
         self.schedule(source.refresh_discoveries(None))
         self.assertEqual(source.broadcasts, [])
 
-    def test_hf_playlist_is_live_authority_and_output_remains_excluded(self):
+    def test_playlist_marks_capture_and_output_remains_excluded(self):
         template = "https://space.example/p/private-token/streams/2631340b81ae/play.m3u8"
         rows = [
             {"chat_id": 4347395930, "title": "RRR output", "username": None,
@@ -198,12 +211,34 @@ class DiscoveryExclusionTests(unittest.TestCase):
             self.schedule(source.refresh_discoveries(None))
 
         self.assertEqual([row["chat_id"] for row in source.broadcasts], [2961901881, 2184200485])
-        self.assertTrue(source.broadcasts[0]["live"])
-        self.assertFalse(source.broadcasts[1]["live"])
+        self.assertTrue(source.broadcasts[0]["capturable"])
+        self.assertFalse(source.broadcasts[1]["capturable"])
         self.assertEqual(source.broadcasts[0]["preview_url"],
                          "https://space.example/p/private-token/watch/2631340b81ae")
+        # Telegram reports this chat live, so it stays visible; only capture
+        # state and the preview depend on the playlist.
+        self.assertTrue(source.broadcasts[1]["live"])
+        self.assertNotIn("preview_url", source.broadcasts[1])
 
-    def test_hf_liveness_refreshes_between_telegram_scans(self):
+    def test_chat_telegram_reports_live_survives_a_playlist_that_omits_it(self):
+        # The reported bug: a livestreaming chat the capture host has not listed
+        # disappeared from the panel entirely.
+        template = "https://space.example/p/private-token/streams/2631340b81ae/play.m3u8"
+        source = self.relay(4347395930)
+        source.config["input_url"] = template
+
+        async def discover(_operation):
+            return ([{"chat_id": 2291644480, "title": "India Racing", "username": None,
+                      "live": True, "rtmp": True, "scheduled": False}], 4347395930)
+        source._with_telegram = discover
+        with patch("relay_engine.daemon.tgtv.fetch_live_stream_ids", return_value=set()):
+            self.schedule(source.refresh_discoveries(None))
+
+        self.assertEqual(len(source.broadcasts), 1)
+        self.assertTrue(source.broadcasts[0]["live"])
+        self.assertFalse(source.broadcasts[0]["capturable"])
+
+    def test_playlist_refresh_updates_capture_between_telegram_scans(self):
         template = "https://space.example/p/private-token/streams/2631340b81ae/play.m3u8"
         first_id, second_id = 2961901881, 2184200485
         source = self.relay(4347395930)
@@ -221,12 +256,15 @@ class DiscoveryExclusionTests(unittest.TestCase):
                    return_value={tgtv.stream_id(second_id)}):
             self.schedule(source.refresh_discoveries(None))
 
-        self.assertEqual([row["live"] for row in source.broadcasts], [False, True])
+        self.assertFalse(source.broadcasts[0]["capturable"])
+        self.assertTrue(source.broadcasts[0]["live"],
+                        "Telegram live state must survive a playlist refresh")
         self.assertNotIn("preview_url", source.broadcasts[0])
+        self.assertTrue(source.broadcasts[1]["capturable"])
         self.assertEqual(source.broadcasts[1]["preview_url"],
                          tgtv.preview_url(template, second_id))
 
-    def test_missing_hf_input_fails_closed_for_existing_sources(self):
+    def test_missing_input_keeps_telegram_live_and_marks_uncapturable(self):
         source = self.relay(4347395930)
         source.broadcasts = [{
             "chat_id": 2961901881, "title": "Turbo", "live": True,
@@ -237,8 +275,10 @@ class DiscoveryExclusionTests(unittest.TestCase):
 
         self.schedule(source.refresh_discoveries(None))
 
-        self.assertFalse(source.broadcasts[0]["live"])
+        self.assertTrue(source.broadcasts[0]["live"])
+        self.assertFalse(source.broadcasts[0]["capturable"])
         self.assertNotIn("preview_url", source.broadcasts[0])
+        self.assertEqual(source.discovery_error, "TGTV live playlist is not configured")
 
     def test_forced_source_still_refreshes_playlist_liveness(self):
         # A forced source skips Telegram membership discovery, but the pinned
@@ -256,12 +296,15 @@ class DiscoveryExclusionTests(unittest.TestCase):
         fetch.assert_called_once_with(template)
         self.assertEqual(source.active_stream_ids, {tgtv.stream_id(2961901881)})
 
-    def test_unavailable_hf_playlist_fails_closed_without_leaking_url(self):
+    def test_unavailable_playlist_does_not_hide_live_chats_or_leak_url(self):
         source = self.relay(4347395930)
         source.config["input_url"] = "https://space.example/p/private-token/streams/2631340b81ae/play.m3u8"
         with patch("relay_engine.daemon.tgtv.fetch_live_stream_ids", side_effect=RuntimeError("private-token")):
             self.schedule(source.refresh_discoveries(None))
-        self.assertTrue(all(not row["live"] for row in source.broadcasts))
+        self.assertTrue(all(not row["capturable"] for row in source.broadcasts))
+        self.assertTrue(any(row["live"] for row in source.broadcasts),
+                        "a playlist outage must not blank a chat Telegram reports live")
+        self.assertTrue(all("preview_url" not in row for row in source.broadcasts))
         self.assertNotIn("private-token", source.discovery_error)
 
     def schedule(self, coroutine):

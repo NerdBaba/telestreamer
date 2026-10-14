@@ -30,16 +30,21 @@ def _title(entity) -> str:
 
 
 async def discover_broadcasts(client) -> list[dict]:
-    """Every channel the session can see, with its current broadcast state.
+    """Every channel or group the session can see, with its broadcast state.
 
-    A channel is listed even when idle so the caller can distinguish "no feed"
-    from "not a channel at all". Live state comes from the group call attached
-    to the channel, which is the same signal the publisher uses.
+    A chat is listed even when idle so the caller can distinguish "no feed"
+    from "not a call-capable chat at all". Live state comes from the group call
+    attached to the chat, which is the same signal the publisher uses.
+
+    Both broadcast channels and megagroups are included: a live stream or video
+    chat runs in either, and listing only broadcast channels hid every group
+    the session is a member of. Basic groups and private chats carry no call,
+    so they are skipped by the same test the caller already relies on.
     """
     found: list[dict] = []
     async for dialog in client.iter_dialogs():
         entity = dialog.entity
-        if not getattr(entity, "broadcast", False):
+        if not (getattr(entity, "broadcast", False) or getattr(entity, "megagroup", False)):
             continue
         call = getattr(entity, "call", None)
         live = call is not None and not bool(getattr(call, "schedule_date", None))

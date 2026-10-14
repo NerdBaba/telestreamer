@@ -505,6 +505,57 @@ class DestinationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(relay.last_error, "discarded an ended call")
             self.assertEqual(relay.next_publish, 0)
 
+class PublishRefreshTests(unittest.IsolatedAsyncioTestCase):
+    """A cached stream key must not fail forever if Telegram rotates it."""
+
+    async def relay_ready_to_publish(self):
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        relay = Relay({"admin_token": "isolated-publish-token", "output_dir": "hls"}, Path(directory))
+        (relay.output / "index.m3u8").write_text("#EXTM3U\n#EXTINF:1.0,\nseg.ts\n")
+        relay.decision = {"chosen": "rwitc", "available": True}
+        relay.desired = relay.current = "rwitc"
+        relay.media = SimpleNamespace(poll=lambda: None)
+        relay.destination = "rtmp://example.invalid/app/stale-key"
+        relay.publisher = SimpleNamespace(close=AsyncMock())
+        return relay
+
+    async def test_repeated_publish_failures_request_fresh_credentials(self):
+        relay = await self.relay_ready_to_publish()
+        running = SimpleNamespace(poll=lambda: None)
+
+        with patch("relay_engine.daemon.launch_publisher", return_value=running):
+            for _ in range(daemon.PUBLISH_FAILURES_BEFORE_REFRESH):
+                relay.push = SimpleNamespace(poll=lambda: 1, returncode=1)
+                await relay.reconcile()
+
+        self.assertIsNone(relay.destination, "a stale key must be re-resolved")
+        self.assertIsNone(relay.publisher)
+        self.assertEqual(relay.push_failures, 0)
+        self.assertEqual(relay.next_publish, 0, "credentials are fetched immediately")
+
+    async def test_a_single_publish_failure_keeps_the_cached_key(self):
+        relay = await self.relay_ready_to_publish()
+        running = SimpleNamespace(poll=lambda: None)
+
+        with patch("relay_engine.daemon.launch_publisher", return_value=running):
+            relay.push = SimpleNamespace(poll=lambda: 1, returncode=1)
+            await relay.reconcile()
+
+        self.assertEqual(relay.destination, "rtmp://example.invalid/app/stale-key")
+        self.assertEqual(relay.push_failures, 1)
+
+    async def test_a_healthy_push_resets_the_failure_count(self):
+        relay = await self.relay_ready_to_publish()
+        relay.push = SimpleNamespace(poll=lambda: None)
+        relay.push_failures = 2
+
+        await relay.reconcile()
+
+        self.assertEqual(relay.push_failures, 0)
+        self.assertEqual(relay.destination, "rtmp://example.invalid/app/stale-key")
+
+
 class PinnedAvailabilityTests(unittest.IsolatedAsyncioTestCase):
     """Availability must come from the playlist, never from an ingest request."""
 

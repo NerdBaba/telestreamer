@@ -40,6 +40,15 @@ playlist gets a longer grace than a playlist that simply stops advancing.
 """
 
 
+PUBLISH_FAILURES_BEFORE_REFRESH = 3
+"""Consecutive publisher exits before the cached stream key is re-resolved.
+
+Telegram can rotate an RTMP key while a call stays open. The destination is
+cached so the relay does not call Telegram on every restart, which means a
+rotated key would otherwise fail forever until the service restarted.
+"""
+
+
 def restart_delay(failures: int) -> float:
     """Growing, capped delay before restarting failed media.
 
@@ -194,6 +203,7 @@ class Relay:
         self.media_log = self.output.parent / "media.log"
         self.media_failures = 0
         self.push = None
+        self.push_failures = 0
         self.current = None
         self.publisher = None
         self.destination = None
@@ -259,6 +269,11 @@ class Relay:
                 "enabled": bool(self.config.get("discover_channels")),
                 "error": self.discovery_error,
                 "last_found": self.discovered_at,
+                # Counts make a truncated member list obvious instead of looking
+                # like "nothing is live".
+                "channels": len(self.broadcasts),
+                "live": sum(1 for item in self.broadcasts if item.get("live")),
+                "capturable": sum(1 for item in self.broadcasts if item.get("capturable")),
             },
             "last_error": self.last_error,
             "fixtures": [{"date": meeting.iso, "title": meeting.title} for meeting in self.meetings],
@@ -341,11 +356,15 @@ class Relay:
                     continue
                 item = dict(row)
                 item["stream_id"] = tgtv.stream_id(item["chat_id"])
+                # Telegram's call is the authority for "is it livestreaming";
+                # the playlist only reports whether the capture can serve it.
+                item["telegram_live"] = bool(row.get("live"))
                 item.pop("preview_url", None)
                 self.broadcasts.append(item)
         if not input_url:
             for item in self.broadcasts:
-                item["live"] = False
+                item["capturable"] = False
+                item["live"] = bool(item.get("telegram_live", item.get("live")))
                 item.pop("preview_url", None)
             self.active_stream_ids = set()
             self.discovery_error = "TGTV live playlist is not configured"
@@ -362,8 +381,13 @@ class Relay:
         for item in self.broadcasts:
             stream_id = item.get("stream_id") or tgtv.stream_id(item["chat_id"])
             item["stream_id"] = stream_id
-            item["live"] = stream_id in active_ids
-            if item["live"]:
+            capturable = stream_id in active_ids
+            item["capturable"] = capturable
+            # Never hide a chat that Telegram reports as livestreaming just
+            # because the capture host has not listed its stream (yet): a
+            # sleeping or lagging capture used to blank the whole list.
+            item["live"] = bool(item.get("telegram_live", item.get("live"))) or capturable
+            if capturable:
                 item["scheduled"] = False
                 item["preview_url"] = tgtv.preview_url_for_id(input_url, stream_id)
             else:
@@ -468,6 +492,14 @@ class Relay:
         for file in self.output.iterdir():
             if file.suffix in (".m3u8", ".ts", ".tmp"):
                 file.unlink(missing_ok=True)
+
+    async def release_publisher(self) -> None:
+        """Close the Telegram publisher so its credentials can be re-resolved."""
+        publisher = self.publisher
+        self.publisher = None
+        if publisher is not None:
+            with contextlib.suppress(Exception):
+                await publisher.close()
 
     def telegram_credentials(self) -> tuple[str, str] | None:
         """API id/hash from config or environment; absent means no publishing."""
@@ -666,7 +698,17 @@ class Relay:
                 self.last_error = f"publishing process exited ({self.push.returncode}); reconnecting"
                 await self.terminate(self.push)
                 self.push = None
-                self.next_publish = time.monotonic() + 3
+                self.push_failures += 1
+                if self.push_failures >= PUBLISH_FAILURES_BEFORE_REFRESH:
+                    # The destination is cached, so a key Telegram rotated would
+                    # fail forever; ask for fresh credentials instead.
+                    self.last_error = "publishing keeps failing; refreshing the Telegram stream key"
+                    await self.release_publisher()
+                    self.destination = None
+                    self.push_failures = 0
+                    self.next_publish = 0
+                else:
+                    self.next_publish = time.monotonic() + 3
             if self.destination and not self.push and time.monotonic() >= self.next_publish:
                 try:
                     self.push = await asyncio.to_thread(
@@ -686,6 +728,7 @@ class Relay:
                         self.last_error = f"channel announcement failed: {type(exc).__name__}"
             elif self.push and self.push.poll() is None:
                 self.publishing = "publishing process running"
+                self.push_failures = 0
 
     async def control(self, body: dict) -> dict:
         action = body.get("action")
@@ -722,7 +765,7 @@ class Relay:
             except Exception:
                 raise ValueError("TGTV live sources are unavailable; refresh and retry") from None
             if stream_id not in active_ids:
-                raise ValueError("channel is no longer live; refresh and retry")
+                raise ValueError("the capture host is not serving this stream yet; refresh and retry")
 
         if action == "release_call":
             credentials = self.telegram_credentials()
