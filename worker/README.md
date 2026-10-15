@@ -92,6 +92,35 @@ Those require real API/account credentials. Cryptographic login work may exceed
 free-tier Worker CPU allowances; check the account's limits before enabling it.
 No paid-plan upgrade is performed automatically.
 
+## Private stream controls
+
+The private page is `/admin/<ADMIN_SECRET>`. Its top message explains whether
+the stream is paused, off, starting, sending, or cannot be checked, followed by
+one next step. Source previews open separately; **Use this stream** selects a
+feed and allows it to start, including while paused. Pause and Stop take
+priority over automatic starting. Less common options are in **More settings**.
+
+`GET /admin/<ADMIN_SECRET>/checks` independently checks the relay, Hugging Face
+Space, and Space live-stream list. Configure these additional Worker secrets:
+
+- `CAPTURE_ORIGIN`: the Space HTTPS origin, without its playback token.
+- `CAPTURE_PLAYLIST_URL`: its private `/p/<PATH_SECRET>/playlist.m3u` URL.
+
+Missing settings show **Setup needed**, not an offline server. An empty valid
+list is different from a failed list. Checks use only `/healthz`, `/health`,
+and `/playlist.m3u`; they never request video or start a Telegram capture.
+Responses have a five-second deadline and a 64 KiB body limit, and redirects
+are not followed. Private URLs and upstream bodies never enter check results.
+
+Server checks refresh every 30 seconds; relay status refreshes about every five
+seconds, without overlapping requests. **Check again** refreshes both. Last
+check times and stale warnings distinguish current results from old ones.
+Command feedback stays visible across refreshes. A successful command means
+accepted, not necessarily broadcasting. Incoming video alone never implies
+sending; even a running sender still needs picture/sound confirmation in
+Telegram. Raw relay errors are translated into safe explanations.
+
+
 ## Daemon playout
 
 Configure `RELAY_ORIGIN` with a reachable HTTPS origin for the local daemon and

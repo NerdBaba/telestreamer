@@ -19,6 +19,7 @@ export type Env = Cloudflare.Env & TelegramEnv & RelayEnv;
 import { handleProbe } from "./mtproto/probe";
 import { handleTelegram, type TelegramEnv } from "./mtproto/telegram";
 import { adminPage, adminRelayControl } from "./admin";
+import { adminHealthChecks } from "./admin-health";
 import { fixturesResponse, relayLive, relayStatus, wakeRelay, type RelayEnv } from "./relay";
 import { telegramLoginPage } from "./telegram-login";
 import { handleRelayState } from "./relay-state";
@@ -467,10 +468,14 @@ export default {
     // Control plane. The secret path segment keeps the entry unguessable; the
     // relay token never leaves the worker, so the browser only sees proxied
     // status and never the channel or RTMP origin it forwards to.
-    const admin = url.pathname.match(/^\/admin\/([0-9a-f]{32,64})(?:\/(control|status))?$/);
+    const admin = url.pathname.match(/^\/admin\/([0-9a-f]{32,64})(?:\/(control|status|checks))?$/);
     if (admin) {
       if (!env.ADMIN_SECRET || admin[1] !== env.ADMIN_SECRET) {
         return json({ error: "not found" }, { status: 404 });
+      }
+      if (admin[2] === "checks") {
+        if (request.method !== "GET") return json({ error: "method_not_allowed" }, { status: 405 });
+        return await adminHealthChecks(env);
       }
       if (admin[2] === "status") {
         if (request.method !== "GET") return json({ error: "method_not_allowed" }, { status: 405 });

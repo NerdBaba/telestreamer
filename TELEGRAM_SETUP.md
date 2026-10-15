@@ -96,11 +96,21 @@ https://rwitc-racing.curos282.workers.dev/admin/<ADMIN_SECRET>
 ```
 
 `ADMIN_SECRET` is a Cloudflare secret, not in the repository, and never in
-chat. The page is `noindex` and self-contained. It shows member-channel names,
-live state, Hugging Face previews, the selected source, race fixtures, and
-play/pause/stop/auto-start controls. The private page may expose the
-PATH_SECRET-protected preview URL, but sends no referrer to Hugging Face. It
-does not expose the RTMP host, relay origin, or relay bearer token.
+chat. The page is `noindex` and self-contained. A plain-language summary says
+whether video is paused, off, starting, sending, or cannot be checked, with a
+next step. Separate checks show the relay server, Hugging Face Space, Space
+stream list, incoming video, and Telegram sending. An empty list is not a broken
+list; incoming video is not proof of Telegram playback. Confirm picture and
+sound in Telegram when the sender is running.
+
+**Check again** refreshes status and checks. Accepted commands keep their
+feedback visible, but do not claim broadcasting succeeded. **More settings**
+contains automatic starting, alternate sources, and old-call cleanup.
+The private page may expose the PATH_SECRET-protected preview URL but sends no
+referrer to Hugging Face. It does not expose the RTMP host, relay origin, or relay
+bearer token. Diagnostic checks only request health and the live stream list;
+they never request video or start a capture. Configure the Worker secrets
+`CAPTURE_ORIGIN` and `CAPTURE_PLAYLIST_URL` for those checks.
 
 ### Admin control never waits behind a media cycle
 

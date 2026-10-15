@@ -2,8 +2,8 @@
 
 **Origin:** https://rwitc-racing.curos282.workers.dev
 
-**Verified deployment:** `c3e690fb-d0ec-4d50-84c5-6dcc73e49d1e` — migrated
-to Cloudflare account `eb588e5973f0d75d6c0e7e90b12fb219`, 2026-10-15.
+**Verified deployment:** `22643738-0adb-4b01-a8d1-dded86181b20` — plain-language
+stream controls with independent component checks, 2026-10-15.
 
 **D1:** `rwitc-telegram`, database `b96437ce-2fb6-4a97-9ec4-9b3e720634c5`.
 The fresh schema includes `relay_state.selected_chat_id`. Existing relay
@@ -14,7 +14,22 @@ migrated; edge API credentials were not available in the previous deployment.
 Production secrets configure admin authentication, session encryption, and the
 existing private Render relay. The new private panel URL is stored locally in
 ignored `.relay/admin-url`; production secrets are in ignored
-`worker/.dev.vars.production.json`, both mode `0600`. Do not commit either.
+`worker/.dev.vars.release.json`, both mode `0600`. Do not commit either.
+
+## Dashboard verification, 2026-10-15
+
+| Check | Observed result |
+|---|---|
+| New `/checks` endpoint, production | Relay and Space healthy; valid stream list loaded |
+| Chrome testing, deployed page | “Your stream is paused”; Incoming video Paused; Sending Off — paused; no browser errors |
+| Isolated Chrome scenarios | Space unreachable, playlist failure, empty list, relay unreachable, incoming-only video, missing sender data, running sender, blocked call, legacy live-state fields |
+| Isolated command feedback | Refused command leaves state unchanged; selection accepted; feedback survives refresh |
+| Keyboard and mobile | Source focus/node preserved across polling, 3px focus outline; 320px without overflow or undersized visible targets |
+| Worker preflight | Typecheck, 54 tests, dry-run passed |
+
+No production pause/resume/source-selection action was sent during these checks.
+The current relay remains paused. Component checks do not establish viewer
+playback or automatically restart a stopped service.
 
 ## Migration verification, 2026-10-15
 

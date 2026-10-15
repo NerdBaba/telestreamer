@@ -1,6 +1,8 @@
 export interface RelayEnv {
   RELAY_ORIGIN?: string;
   RELAY_TOKEN?: string;
+  CAPTURE_ORIGIN?: string;
+  CAPTURE_PLAYLIST_URL?: string;
   /** Unguessable path segment for the admin page; absence disables the panel. */
   ADMIN_SECRET?: string;
 }
