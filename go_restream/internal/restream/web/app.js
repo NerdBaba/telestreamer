@@ -49,7 +49,7 @@ function render(s) {
   const primary=source.chat_id===2961901881, chosen=source.id===s.active;
   card.classList.toggle('active',chosen);card.querySelector('h3').textContent=source.title;
   const index=(s.controls.fallbacks||[]).indexOf(source.id);
-  card.querySelector('.source-role').textContent=primary?'PRIMARY SOURCE':source.id==='rwitc'?'OFFICIAL FALLBACK':index>=0?'FALLBACK '+(index+1):'MEMBER CHANNEL';
+  card.querySelector('.source-role').textContent=primary?'PRIMARY SOURCE':['rwitc','mysore'].includes(source.id)?'OFFICIAL FALLBACK':index>=0?'FALLBACK '+(index+1):'MEMBER CHANNEL';
   card.querySelector('.source-detail').textContent=source.detail;
   const badge=card.querySelector('.source-badge');badge.textContent=chosen?'On air':source.live?'Live':'Offline';badge.classList.toggle('live',source.live);
   const preview=card.querySelector('.preview-button');preview.disabled=!source.live;preview.lastElementChild.textContent=source.live?'Open preview':'No live broadcast';

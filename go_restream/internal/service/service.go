@@ -171,7 +171,7 @@ func Run(ctx context.Context, cfg config.Settings, pathSecret string, log *zap.L
 		if err != nil {
 			return err
 		}
-		go capture.PollRWITC(relayCtx)
+		go capture.PollOfficialStreams(relayCtx)
 		relayDone := make(chan struct{})
 		go func() { defer close(relayDone); controller.Run(relayCtx) }()
 		defer func() { stopRelay(); <-relayDone }()

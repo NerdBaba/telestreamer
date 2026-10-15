@@ -140,6 +140,10 @@ its authenticated API and media. Set `STREAMDESK_ENABLED=true`, `RELAY_ORIGIN`
 and `RELAY_TOKEN` in the Worker after the backend is ready. The existing private
 `/admin/<secret>` URL opens the new desk and issues a private session cookie.
 The Worker preserves its legacy routes and other source integrations.
+Mysore appears as a separate optional fallback in the Go desk. Its resolver
+uses the existing Worker's `/api/mysore/live` route and independently verifies
+playlist timestamps and segment availability. `MYSORE_WORKER_ORIGIN` can
+override that Worker's origin. Both official feeds are checked concurrently.
 
 For Render's ephemeral filesystem, set `SESSION_JSON_B64` to the base64-encoded
 offline-converted gotd JSON session. Startup restores it with mode 0600. Set

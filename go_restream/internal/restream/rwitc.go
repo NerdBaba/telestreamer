@@ -37,6 +37,7 @@ func get(ctx context.Context, client *http.Client, url, headers string) ([]byte,
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; StreamDesk/1.0)")
 	for _, line := range strings.Split(headers, "\r\n") {
 		key, value, ok := strings.Cut(line, ":")
 		if ok {
@@ -155,7 +156,11 @@ func (r RWITC) Resolve(ctx context.Context) (Source, error) {
 		}
 	}
 	s.Headers = fmt.Sprintf("Cookie: CloudFront-Key-Pair-Id=%s; CloudFront-Policy=%s; CloudFront-Signature=%s\r\n", signing.Key, signing.Policy, signing.Signature)
-	data, err = get(ctx, client, masterURL, s.Headers)
+	return verifyHLS(ctx, client, s, masterURL)
+}
+
+func verifyHLS(ctx context.Context, client *http.Client, s Source, masterURL string) (Source, error) {
+	data, err := get(ctx, client, masterURL, s.Headers)
 	if err != nil {
 		return s, err
 	}
@@ -183,7 +188,12 @@ func (r RWITC) Resolve(ctx context.Context) (Source, error) {
 	if err != nil {
 		return s, err
 	}
-	req.Header.Set("Cookie", strings.TrimSuffix(strings.TrimPrefix(s.Headers, "Cookie: "), "\r\n"))
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; StreamDesk/1.0)")
+	for _, line := range strings.Split(s.Headers, "\r\n") {
+		if key, value, ok := strings.Cut(line, ":"); ok {
+			req.Header.Set(key, strings.TrimSpace(value))
+		}
+	}
 	req.Header.Set("Range", "bytes=0-0")
 	resp, err := client.Do(req)
 	if err != nil {

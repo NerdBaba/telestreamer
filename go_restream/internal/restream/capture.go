@@ -39,32 +39,48 @@ type Capture struct {
 	BaseURL  string
 	mu       sync.RWMutex
 	rwitc    Source
+	mysore   Source
 	checks   map[string]callCheck
 }
 
-func (d *Capture) PollRWITC(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	for {
-		probe, cancel := context.WithTimeout(ctx, 20*time.Second)
-		s, err := (RWITC{}).Resolve(probe)
-		cancel()
-		if err != nil {
-			s = Source{ID: "rwitc", Title: "RWITC Official", Detail: "Provider unavailable; checking again"}
-		}
-		d.mu.Lock()
-		if err != nil && d.rwitc.Live {
-			d.rwitc.Detail = "Discovery unavailable; retaining last verified feed"
-		} else {
-			d.rwitc = s
-		}
-		d.mu.Unlock()
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
+func (d *Capture) PollOfficialStreams(ctx context.Context) {
+	var wg sync.WaitGroup
+	for _, provider := range []struct {
+		id, title string
+		resolve   func(context.Context) (Source, error)
+	}{{"rwitc", "RWITC Official", (RWITC{}).Resolve}, {"mysore", "Mysore Race Club", (Mysore{}).Resolve}} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				probe, cancel := context.WithTimeout(ctx, 20*time.Second)
+				s, err := provider.resolve(probe)
+				cancel()
+				if err != nil {
+					s = Source{ID: provider.id, Title: provider.title, Detail: "Provider unavailable; checking again"}
+				}
+				d.mu.Lock()
+				current := &d.rwitc
+				if provider.id == "mysore" {
+					current = &d.mysore
+				}
+				if err != nil && current.Live {
+					current.Detail = "Discovery unavailable; retaining last verified feed"
+				} else {
+					*current = s
+				}
+				d.mu.Unlock()
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
 	}
+	wg.Wait()
 }
 func (d *Capture) Sources(ctx context.Context) ([]Source, error) {
 	if d.checks == nil {
@@ -120,11 +136,15 @@ func (d *Capture) Sources(ctx context.Context) ([]Source, error) {
 	}
 	d.mu.RLock()
 	official := d.rwitc
+	mysore := d.mysore
 	d.mu.RUnlock()
 	if official.ID == "" {
 		official = Source{ID: "rwitc", Title: "RWITC Official", Detail: "Checking official stream"}
 	}
-	rows = append(rows, official)
+	if mysore.ID == "" {
+		mysore = Source{ID: "mysore", Title: "Mysore Race Club", Detail: "Checking official stream"}
+	}
+	rows = append(rows, official, mysore)
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].ChatID == TurboChatID {
 			return true
@@ -146,7 +166,7 @@ func (d *Capture) Sources(ctx context.Context) ([]Source, error) {
 	return rows, nil
 }
 func (d *Capture) Prepare(ctx context.Context, s Source) (bool, error) {
-	if s.ID == "rwitc" {
+	if s.ID == "rwitc" || s.ID == "mysore" {
 		return s.Live, nil
 	}
 	// Reclaim abandoned previews while retaining the previous outgoing input
