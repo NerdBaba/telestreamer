@@ -1,0 +1,22 @@
+services:
+  streamdesk:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - ./data:/data
+    tmpfs:
+      - /dev/shm:size=512m,mode=1777
+      - /data/config/output:size=96m,uid=10001,gid=10001,mode=0700
+    stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

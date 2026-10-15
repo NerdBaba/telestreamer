@@ -1,0 +1,10 @@
+.git
+.env*
+data
+.demo-data
+*.session*
+*.json.export
+streamdesk
+
+!.env.example
+*export*.json

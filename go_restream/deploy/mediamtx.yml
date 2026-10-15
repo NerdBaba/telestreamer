@@ -1,0 +1,15 @@
+logLevel: warn
+rtmp: yes
+rtmpAddress: 127.0.0.1:1935
+rtsp: no
+webrtc: no
+srt: no
+hls: yes
+hlsAddress: 127.0.0.1:8888
+hlsVariant: mpegts
+hlsSegmentCount: 8
+hlsSegmentDuration: 1s
+hlsAlwaysRemux: yes
+api: no
+paths:
+  all_others:
