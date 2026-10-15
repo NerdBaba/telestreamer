@@ -85,6 +85,26 @@ test('component checks remain independent when relay, Space, or playlist fails',
     'health and list checks must never request a media or ingestion route');
 });
 
+test('relay and video checks split so the page polls them at different rates', async t => {
+  const host = await upstream(t);
+  const relayOnly = await host.fetchChecks({}, `/admin/${SECRET}/checks/relay`);
+  assert.equal(relayOnly.status, 200);
+  const relayBody = await relayOnly.json() as { checks: Record<string, unknown> };
+  assert.deepEqual(Object.keys(relayBody.checks).sort(), ['relay']);
+  assert.equal(host.seen.every(row => row.path === '/healthz'), true);
+
+  host.seen.length = 0;
+  const videoOnly = await host.fetchChecks({}, `/admin/${SECRET}/checks/video`);
+  assert.equal(videoOnly.status, 200);
+  const videoBody = await videoOnly.json() as { checks: Record<string, unknown> };
+  assert.deepEqual(Object.keys(videoBody.checks).sort(), ['playlist', 'space']);
+  assert.equal(host.seen.some(row => row.path === '/healthz'), false);
+  for (const method of ['POST', 'HEAD', 'OPTIONS']) {
+    assert.equal((await host.fetchChecks({}, `/admin/${SECRET}/checks/relay`, method)).status, 405);
+    assert.equal((await host.fetchChecks({}, `/admin/${SECRET}/checks/video`, method)).status, 405);
+  }
+});
+
 test('healthy HTTP requires the actual relay and Space success JSON', async t => {
   const host = await upstream(t);
   for (const body of ['{"ok":false}', '{"ok":"true"}', '{}', 'null', '<html>loading</html>', '{"ok":true,"error":"broken"}']) {

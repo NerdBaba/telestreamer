@@ -18,6 +18,34 @@ type ControlAction =
   // Discard an empty ended output call that blocks a new RTMP broadcast.
   | { action: 'release_call' };
 
+/** Relay event log proxy: bearer token stays server-side, limit is clamped. */
+export async function adminRelayLogs(request: Request, env: RelayEnv): Promise<Response> {
+  const headers = { 'Cache-Control': 'no-store' };
+  if (!env.RELAY_ORIGIN || !env.RELAY_TOKEN) {
+    return Response.json({ error: 'relay_unconfigured' }, { status: 503, headers });
+  }
+  const url = new URL(request.url);
+  const raw = url.searchParams.get('limit');
+  const limit = raw === null ? 50 : Math.max(1, Math.min(200, Number(raw) || 50));
+  const upstream = await fetch(new URL(`/api/logs?limit=${limit}`, env.RELAY_ORIGIN), {
+    headers: { 'Authorization': `Bearer ${env.RELAY_TOKEN}` },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!upstream.ok) {
+    return Response.json({ error: 'relay_unreachable' }, { status: 502, headers });
+  }
+  let payload: unknown;
+  try {
+    payload = await upstream.json();
+  } catch {
+    return Response.json({ error: 'invalid_response' }, { status: 502, headers });
+  }
+  if (!payload || typeof payload !== 'object' || !Array.isArray((payload as Record<string, unknown>).events)) {
+    return Response.json({ error: 'invalid_response' }, { status: 502, headers });
+  }
+  return Response.json(payload, { headers });
+}
+
 /** Control writes never carry the worker token to the browser. */
 export async function adminRelayControl(request: Request, env: RelayEnv): Promise<Response> {
   const headers = { 'Cache-Control': 'no-store' };
@@ -116,18 +144,18 @@ export function adminPage(entryVersion: string = ENTRY_VERSION): Response {
 <li class="check" id="check-playlist"><div class="check-head"><h3>Live stream list</h3><span class="check-state">Checking</span></div><p>Lists the feeds available on the video server.</p></li>
 <li class="check" id="check-input"><div class="check-head"><h3>Incoming video</h3><span class="check-state">Checking</span></div><p>Checks whether the relay is receiving video.</p></li>
 <li class="check" id="check-output"><div class="check-head"><h3>Sending to Telegram</h3><span class="check-state">Checking</span></div><p>Checks the sending process, not viewer playback.</p></li>
-</ul><p class="stamp" id="checks-stamp">Server checks have not finished yet.</p><p class="help" id="checks-note" role="status" aria-live="polite" aria-atomic="true">Server checks repeat every 30 seconds. Stream status repeats about every 5 seconds.</p></section>
+</ul><p class="stamp" id="checks-stamp">Server checks have not finished yet.</p><p class="help" id="checks-note" role="status" aria-live="polite" aria-atomic="true">Relay checks repeat every 30 seconds, video checks every 60 seconds. Stream status repeats about every 5 seconds.</p></section>
 <section class="panel sources-panel" aria-labelledby="sources-heading"><h2 id="sources-heading" tabindex="-1">Choose a live stream</h2><p class="help">These are feeds the relay found. “Live in Telegram” and “Available in the stream list” are different checks. Being in the list does not prove the video will play.</p><p class="help">Preview opens a new tab. “Use this stream” asks the relay to send that feed now, even if paused or automatic starting is off.</p><p class="empty" id="sources-note">Checking for live streams.</p><div id="sources" class="sources"></div></section>
 <section class="panel" aria-labelledby="settings-heading"><details id="more-settings"><summary id="settings-heading">More settings</summary><div class="setting"><h3>Other video sources</h3><p>Automatic chooses from the configured sources. Turbo and Official stream choose one instead. This clears your selected Telegram feed but does not cancel a pause.</p><div class="choice-grid" aria-label="Other video sources"><button id="auto" class="choice" type="button" disabled>Automatic</button><button id="force-turbo" class="choice" type="button" disabled>Turbo</button><button id="force-rwitc" class="choice" type="button" disabled>Official stream</button></div></div><div class="setting"><h3>Automatic starting</h3><p>When on, the relay may start an available feed. Pause and Stop always take priority. When off, “Use this stream” can still start a selected feed.</p><button id="autostart" type="button" disabled>Checking setting</button></div><div class="setting"><h3>Clear an old Telegram call</h3><p>Only use this if an ended or incompatible Telegram broadcast call is blocking a new one. It does not fix missing video or sign-in settings.</p><p class="help" id="release-hint">No old-call problem has been reported.</p><button id="release" type="button" hidden disabled>Clear ended output call</button></div></details></section>
 <section class="panel" aria-labelledby="fixtures-heading"><h2 id="fixtures-heading">Upcoming races</h2><div id="fixtures"><p class="empty">Loading the race calendar.</p></div></section>
-<section class="panel details-panel"><details id="technical-details"><summary>Technical details</summary><p class="help">Safe explanations only. Private addresses, access keys, and raw server errors are not shown.</p><dl class="technical"><div><dt>Current source</dt><dd id="source">Not known yet</dd></div><div><dt>Why the relay is waiting</dt><dd id="pending-detail">Checking</dd></div><div><dt>Latest relay issue</dt><dd id="error-detail">Checking</dd></div><div><dt>Finding Telegram feeds</dt><dd id="discovery-detail">Checking</dd></div><div><dt>Relay status last received</dt><dd id="status-time">Not yet</dd></div><div><dt>Server checks last received</dt><dd id="checks-time">Not yet</dd></div></dl></details></section>
+<section class="panel details-panel"><details id="technical-details"><summary>Technical details</summary><div class="setting"><h3>Recent relay events</h3><p>Newest first, from the relay itself. Secrets are redacted before display.</p><div class="button-row"><button id="load-logs" type="button">Load recent events</button></div><p class="stamp" id="logs-stamp">Events have not been loaded yet.</p><div id="logs" class="sources" aria-live="polite"></div></div><p class="help">Safe explanations only. Private addresses, access keys, and raw server errors are not shown.</p><dl class="technical"><div><dt>Current source</dt><dd id="source">Not known yet</dd></div><div><dt>Why the relay is waiting</dt><dd id="pending-detail">Checking</dd></div><div><dt>Latest relay issue</dt><dd id="error-detail">Checking</dd></div><div><dt>Finding Telegram feeds</dt><dd id="discovery-detail">Checking</dd></div><div><dt>Relay status last received</dt><dd id="status-time">Not yet</dd></div><div><dt>Server checks last received</dt><dd id="checks-time">Not yet</dd></div></dl></details></section>
 </main></div>
 <script>
 const el = id => document.getElementById(id);
 const adminPath = location.pathname.replace(/\\/$/, '');
-const state = {status:null,online:false,statusAt:0,statusAttempt:0,statusError:'',checks:null,checksAt:0,checksAttempt:0,checksError:'',fixtures:null,fixturesError:false,busy:false,checking:false,lastPauseAction:null};
+const state = {status:null,online:false,statusAt:0,statusAttempt:0,statusError:'',checks:null,checksAt:0,checksAttempt:0,checksError:'',videoAt:0,fixtures:null,fixturesError:false,busy:false,checking:false,lastPauseAction:null};
 const sourceCards = new Map();
-let statusTimer, checksTimer, statusFlight, checksFlight, fixtureFlight;
+let statusTimer, relayTimer, videoTimer, statusFlight, relayFlight, videoFlight, fixtureFlight;
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[character]);
@@ -418,14 +446,17 @@ function refreshFixtures() {
   })();
   return fixtureFlight;
 }
-function refreshChecks() {
-  if (checksFlight) return checksFlight;
-  clearTimeout(checksTimer);
-  checksFlight = (async () => {
+function mergeChecks(incoming) {
+  if (!incoming || !incoming.checks || typeof incoming.checks !== 'object') throw new Error('invalid');
+  const previous = state.checks && state.checks.checks && typeof state.checks.checks === 'object' ? state.checks.checks : {};
+  state.checks = { checked_at: incoming.checked_at, checks: { ...previous, ...incoming.checks } };
+}
+function refreshRelayCheck() {
+  if (relayFlight) return relayFlight;
+  clearTimeout(relayTimer);
+  relayFlight = (async () => {
     try {
-      const checks = await requestJson(adminPath + '/checks');
-      if (!checks || !checks.checks || typeof checks.checks !== 'object') throw new Error('invalid');
-      state.checks = checks;
+      mergeChecks(await requestJson(adminPath + '/checks/relay'));
       state.checksAt = Date.now();
       state.checksError = '';
     } catch (error) { state.checksError = requestExplanation(error); }
@@ -434,12 +465,33 @@ function refreshChecks() {
       renderChecks();
       renderStamps();
       renderSources();
-      checksFlight = null;
-      checksTimer = setTimeout(refreshChecks,30000);
+      relayFlight = null;
+      relayTimer = setTimeout(refreshRelayCheck,30000);
     }
   })();
-  return checksFlight;
+  return relayFlight;
 }
+function refreshVideoChecks() {
+  if (videoFlight) return videoFlight;
+  clearTimeout(videoTimer);
+  videoFlight = (async () => {
+    try {
+      mergeChecks(await requestJson(adminPath + '/checks/video'));
+      state.videoAt = Date.now();
+      if (!state.checksError) state.checksAt = Date.now();
+    } catch (error) { state.checksError = requestExplanation(error); }
+    finally {
+      state.checksAttempt = Date.now();
+      renderChecks();
+      renderStamps();
+      renderSources();
+      videoFlight = null;
+      videoTimer = setTimeout(refreshVideoChecks,60000);
+    }
+  })();
+  return videoFlight;
+}
+function refreshChecks() { return Promise.all([refreshRelayCheck(),refreshVideoChecks()]); }
 function feedback(message,kind) {
   el('activity').dataset.kind = kind;
   el('activity').textContent = message;
@@ -453,7 +505,7 @@ async function checkAgain() {
   finally {
     state.checking = false;
     el('check-again').textContent = 'Check again';
-    el('checks-note').textContent = 'Check finished. ' + (state.online && !state.checksError ? 'The latest results are shown above.' : 'Some parts could not be checked. Read their messages above.') + ' Server checks repeat every 30 seconds; stream status about every 5 seconds.';
+    el('checks-note').textContent = 'Check finished. ' + (state.online && !state.checksError ? 'The latest results are shown above.' : 'Some parts could not be checked. Read their messages above.') + ' Relay checks repeat every 30 seconds, video checks every 60 seconds; stream status about every 5 seconds.';
     updateButtons();
   }
 }
@@ -481,9 +533,21 @@ el('force-turbo').onclick = () => control({action:'force',source:'turbosportsliv
 el('force-rwitc').onclick = () => control({action:'force',source:'rwitc'},'Saving official source choice','Official source choice accepted. A pause still takes priority; sending is not confirmed.');
 el('autostart').onclick = () => control({action:'auto_start',enabled:!state.status.auto_start},'Saving automatic starting setting','Automatic starting setting accepted. Pause and Stop still take priority; sending is not confirmed.');
 el('release').onclick = () => control({action:'release_call'},'Asking Telegram to clear the old call','Clear-call request accepted. Check again to see whether sending can start; video is not confirmed yet.');
+el('load-logs').onclick = async () => {
+  el('load-logs').disabled = true;
+  el('logs-stamp').textContent = 'Loading events…';
+  try {
+    const data = await requestJson(adminPath + '/logs?limit=50');
+    if (!data || !Array.isArray(data.events)) throw new Error('invalid');
+    el('logs-stamp').textContent = data.events.length ? data.events.length + ' recent event' + (data.events.length === 1 ? '' : 's') + ', newest first.' : 'No relay events recorded yet.';
+    el('logs').innerHTML = data.events.map(event => '<article class="stream-card"><div><h3 class="stream-title">' + escapeHtml(String((event && event.kind) || 'event') + ' · ' + String((event && event.source) || 'relay')) + '</h3><p class="help">' + escapeHtml(String((event && event.at) || '')) + '</p><p>' + escapeHtml(String((event && event.detail) || '')) + '</p></div></article>').join('');
+  } catch (error) { el('logs-stamp').textContent = requestExplanation(error); }
+  finally { el('load-logs').disabled = false; }
+};
 el('check-again').onclick = checkAgain;
 refreshStatus();
-refreshChecks();
+refreshRelayCheck();
+refreshVideoChecks();
 refreshFixtures();
 setInterval(renderStamps,5000);
 </script></body></html>`;

@@ -144,12 +144,34 @@ async function probe(value: string | undefined, component: Component): Promise<C
 
 /** Independent health/list requests only; neither status nor media is fetched. */
 export async function adminHealthChecks(env: RelayEnv): Promise<Response> {
-  const [relay, space, playlist] = await Promise.all([
-    probe(env.RELAY_ORIGIN, 'relay'),
+  const [relay, video] = await Promise.all([relayCheck(env), videoChecks(env)]);
+  return Response.json({ checked_at: new Date().toISOString(), checks: { ...relay, ...video } }, {
+    headers: { 'Cache-Control': 'no-store' },
+  });
+}
+
+/** Relay liveness only: safe to poll often, hits Render, never the video host. */
+export async function adminRelayCheck(env: RelayEnv): Promise<Response> {
+  return Response.json({ checked_at: new Date().toISOString(), checks: await relayCheck(env) }, {
+    headers: { 'Cache-Control': 'no-store' },
+  });
+}
+
+/** Video host checks only, polled less often than the relay. */
+export async function adminVideoChecks(env: RelayEnv): Promise<Response> {
+  return Response.json({ checked_at: new Date().toISOString(), checks: await videoChecks(env) }, {
+    headers: { 'Cache-Control': 'no-store' },
+  });
+}
+
+async function relayCheck(env: RelayEnv): Promise<{ relay: Check }> {
+  return { relay: await probe(env.RELAY_ORIGIN, 'relay') };
+}
+
+async function videoChecks(env: RelayEnv): Promise<{ space: Check; playlist: Check }> {
+  const [space, playlist] = await Promise.all([
     probe(env.CAPTURE_ORIGIN, 'space'),
     probe(env.CAPTURE_PLAYLIST_URL, 'playlist'),
   ]);
-  return Response.json({ checked_at: new Date().toISOString(), checks: { relay, space, playlist } }, {
-    headers: { 'Cache-Control': 'no-store' },
-  });
+  return { space, playlist };
 }

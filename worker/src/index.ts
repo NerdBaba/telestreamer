@@ -18,8 +18,8 @@ export type Env = Cloudflare.Env & TelegramEnv & RelayEnv;
 
 import { handleProbe } from "./mtproto/probe";
 import { handleTelegram, type TelegramEnv } from "./mtproto/telegram";
-import { adminPage, adminRelayControl } from "./admin";
-import { adminHealthChecks } from "./admin-health";
+import { adminPage, adminRelayControl, adminRelayLogs } from "./admin";
+import { adminHealthChecks, adminRelayCheck, adminVideoChecks } from "./admin-health";
 import { fixturesResponse, relayLive, relayStatus, wakeRelay, type RelayEnv } from "./relay";
 import { telegramLoginPage } from "./telegram-login";
 import { handleRelayState } from "./relay-state";
@@ -468,7 +468,7 @@ export default {
     // Control plane. The secret path segment keeps the entry unguessable; the
     // relay token never leaves the worker, so the browser only sees proxied
     // status and never the channel or RTMP origin it forwards to.
-    const admin = url.pathname.match(/^\/admin\/([0-9a-f]{32,64})(?:\/(control|status|checks))?$/);
+    const admin = url.pathname.match(/^\/admin\/([0-9a-f]{32,64})(?:\/(control|status|logs|checks|checks\/relay|checks\/video))?$/);
     if (admin) {
       if (!env.ADMIN_SECRET || admin[1] !== env.ADMIN_SECRET) {
         return json({ error: "not found" }, { status: 404 });
@@ -476,6 +476,14 @@ export default {
       if (admin[2] === "checks") {
         if (request.method !== "GET") return json({ error: "method_not_allowed" }, { status: 405 });
         return await adminHealthChecks(env);
+      }
+      if (admin[2] === "checks/relay") {
+        if (request.method !== "GET") return json({ error: "method_not_allowed" }, { status: 405 });
+        return await adminRelayCheck(env);
+      }
+      if (admin[2] === "checks/video") {
+        if (request.method !== "GET") return json({ error: "method_not_allowed" }, { status: 405 });
+        return await adminVideoChecks(env);
       }
       if (admin[2] === "status") {
         if (request.method !== "GET") return json({ error: "method_not_allowed" }, { status: 405 });
@@ -486,6 +494,10 @@ export default {
         } catch {
           return json({ error: "relay_unreachable", paused: null }, { status: 503 });
         }
+      }
+      if (admin[2] === "logs") {
+        if (request.method !== "GET") return json({ error: "method_not_allowed" }, { status: 405 });
+        return await adminRelayLogs(request, env);
       }
       if (admin[2] === "control") {
         if (request.method !== "POST") return json({ error: "method_not_allowed" }, { status: 405 });

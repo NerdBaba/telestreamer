@@ -436,7 +436,7 @@ class DestinationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
             with patch("relay_engine.telegram.TelegramPublisher", return_value=publisher):
                 await relay.resolve_destination()
 
-            self.assertEqual(relay.last_error, "destination resolution failed: RuntimeError")
+            self.assertEqual(relay.last_error, "destination resolution failed at destination: RuntimeError")
             self.assertNotIn("private-token", relay.last_error)
 
     async def test_destination_flood_wait_delays_next_retry(self):
@@ -505,7 +505,51 @@ class DestinationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(relay.last_error, "discarded an ended call")
             self.assertEqual(relay.next_publish, 0)
 
+class EventLogTests(unittest.IsolatedAsyncioTestCase):
+    async def test_report_error_mirrors_redacted_event(self):
+        with tempfile.TemporaryDirectory() as directory:
+            relay = Relay({"admin_token": "isolated-log-token"}, Path(directory))
+            relay.report_error("destination resolution failed at publisher-connect: ValueError", source="destination")
+            events = relay.recent_events()
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["source"], "destination")
+            self.assertIn("ValueError", events[0]["detail"])
+
+    async def test_event_log_redacts_token_runs_and_caps_size(self):
+        with tempfile.TemporaryDirectory() as directory:
+            relay = Relay({"admin_token": "isolated-log-token"}, Path(directory))
+            relay.note_event("error", "saw " + "k" * 40 + " here", "destination")
+            self.assertNotIn("k" * 40, relay.recent_events()[0]["detail"])
+            for index in range(210):
+                relay.note_event("info", f"event {index}", "media")
+            self.assertEqual(len(relay.event_log), 200)
+            self.assertEqual(relay.recent_events(limit=500)[0]["detail"], "event 209")
+
+    async def test_unknown_error_step_is_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            relay = Relay({
+                "admin_token": "isolated-destination-token",
+                "tg_api_id": 1,
+                "tg_api_hash": "isolated-api-hash",
+            }, Path(directory))
+            publisher = SimpleNamespace(
+                connect=AsyncMock(side_effect=RuntimeError("private-token")),
+                close=AsyncMock(),
+            )
+            publisher._relay_step = "publisher-connect"
+
+            with patch("relay_engine.telegram.TelegramPublisher", return_value=publisher):
+                await relay.resolve_destination()
+
+            self.assertEqual(
+                relay.last_error,
+                "destination resolution failed at publisher-connect: RuntimeError")
+            self.assertNotIn("private-token", relay.last_error)
+            self.assertEqual(relay.recent_events()[0]["source"], "destination")
+
+
 class PublishRefreshTests(unittest.IsolatedAsyncioTestCase):
+
     """A cached stream key must not fail forever if Telegram rotates it."""
 
     async def relay_ready_to_publish(self):

@@ -218,6 +218,7 @@ class Relay:
         self.last_error = None
         self.next_start = 0.0
         self.next_publish = 0.0
+        self.event_log: list[dict] = []
         self.lock = asyncio.Lock()
         self.telegram_lock = asyncio.Lock()
         # Control must answer before a media cycle finishes. reconcile() holds
@@ -233,6 +234,38 @@ class Relay:
     def path(self, raw: str) -> Path:
         value = Path(raw).expanduser()
         return value if value.is_absolute() else self.base / value
+
+    def note_event(self, kind: str, detail: str = "", source: str = "") -> None:
+        """Append a redacted diagnostic event to the in-memory ring buffer.
+
+        Secrets never reach here: callers pass short human phrases, and any
+        token-length run is redacted before storage so the log endpoint can be
+        proxied to the admin page safely.
+        """
+        cleaned = re.sub(r"[A-Za-z0-9_\-]{32,}", "[redacted]", f"{detail}".strip())[:300]
+        entry = {
+            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "kind": kind[:40],
+            "source": source[:40],
+            "detail": cleaned,
+        }
+        self.event_log.append(entry)
+        del self.event_log[:-200]
+
+    def report_error(self, message: str, kind: str = "error", source: str = "") -> None:
+        """Set last_error and mirror it into the event ring buffer."""
+        self.last_error = message
+        self.note_event(kind, message or "", source)
+
+    def recent_events(self, limit: int = 50) -> list[dict]:
+        """Newest-first slice of the event ring buffer for the log endpoint."""
+        try:
+            count = int(limit)
+        except (TypeError, ValueError):
+            count = 50
+        count = max(1, min(count, 200))
+        return list(reversed(self.event_log[-count:]))
+
 
     async def initialize_state(self) -> None:
         async with self.lock:
@@ -278,6 +311,7 @@ class Relay:
             },
             "last_error": self.last_error,
             "fixtures": [{"date": meeting.iso, "title": meeting.title} for meeting in self.meetings],
+            "log": {"events": len(self.event_log)},
         }
 
     async def monitor(self) -> None:
@@ -568,18 +602,18 @@ class Relay:
         credentials = self.telegram_credentials()
         if credentials is None:
             self.publishing = "blocked: Telegram API credentials missing"
-            self.last_error = "destination blocked: TG_API_ID and TG_API_HASH must both be set"
+            self.report_error("destination blocked: TG_API_ID and TG_API_HASH must both be set", source="destination")
             return
         api_id, api_hash = credentials
         try:
             api_id_int = int(str(api_id).strip())
         except (TypeError, ValueError):
             self.publishing = "blocked: Telegram API id is not numeric"
-            self.last_error = "destination blocked: TG_API_ID must be the numeric API id from my.telegram.org"
+            self.report_error("destination blocked: TG_API_ID must be the numeric API id from my.telegram.org", source="destination")
             return
         if api_id_int <= 0 or not str(api_hash).strip():
             self.publishing = "blocked: Telegram API credentials missing"
-            self.last_error = "destination blocked: TG_API_ID and TG_API_HASH must both be set"
+            self.report_error("destination blocked: TG_API_ID and TG_API_HASH must both be set", source="destination")
             return
         try:
             from relay_engine.telegram import TelegramPublisher
@@ -599,17 +633,18 @@ class Relay:
                     raise
             self.next_publish = 0
             self.publishing = "ready"
+            self.note_event("info", "publishing destination ready", "destination")
         except Exception as exc:
             self.publishing = f"blocked: {type(exc).__name__}"
             seconds = getattr(exc, "seconds", None)
             if type(exc).__name__ == "FloodWaitError" and type(seconds) is int and seconds > 0:
                 self.next_publish = time.monotonic() + seconds
-                self.last_error = f"destination retry delayed by Telegram flood wait ({seconds} seconds)"
+                self.report_error(f"destination retry delayed by Telegram flood wait ({seconds} seconds)", source="destination")
             elif type(exc).__name__ == "TelegramAccessError":
-                self.last_error = f"destination blocked: {exc}"
+                self.report_error(f"destination blocked: {exc}", source="destination")
             else:
                 step = getattr(exc, "_relay_step", None) or getattr(self.publisher, "_relay_step", None) or "destination"
-                self.last_error = f"destination resolution failed at {step}: {type(exc).__name__}"
+                self.report_error(f"destination resolution failed at {step}: {type(exc).__name__}", source="destination")
             if self.publisher:
                 with contextlib.suppress(Exception):
                     await self.publisher.close()
@@ -703,10 +738,9 @@ class Relay:
                 return
             if self.media and self.media.poll() is not None:
                 detail = media_failure_detail(self.media_log)
-                self.last_error = (
+                self.report_error(
                     f"media process exited ({self.media.returncode}); restarting"
-                    + (f": {detail}" if detail else "")
-                )
+                    + (f": {detail}" if detail else ""), source="media")
                 self.media_failures += 1
                 await self.stop_media()
                 self.next_start = time.monotonic() + restart_delay(self.media_failures)
@@ -718,7 +752,7 @@ class Relay:
                     stalled = (self.media_started is not None
                                and time.monotonic() - self.media_started >= MEDIA_START_GRACE)
                 if stalled:
-                    self.last_error = "media output stalled; restarting"
+                    self.report_error("media output stalled; restarting", source="media")
                     self.media_failures += 1
                     await self.stop_media()
                     self.next_start = time.monotonic() + restart_delay(self.media_failures)
@@ -747,18 +781,19 @@ class Relay:
                 self.media_started = time.monotonic()
                 self.current = selected
                 self.last_error = None
+                self.note_event("info", f"media starting for {selected}", "media")
             if not self.ready():
                 return
             self.media_failures = 0
             if self.push and self.push.poll() is not None:
-                self.last_error = f"publishing process exited ({self.push.returncode}); reconnecting"
+                self.report_error(f"publishing process exited ({self.push.returncode}); reconnecting", source="publishing")
                 await self.terminate(self.push)
                 self.push = None
                 self.push_failures += 1
                 if self.push_failures >= PUBLISH_FAILURES_BEFORE_REFRESH:
                     # The destination is cached, so a key Telegram rotated would
                     # fail forever; ask for fresh credentials instead.
-                    self.last_error = "publishing keeps failing; refreshing the Telegram stream key"
+                    self.report_error("publishing keeps failing; refreshing the Telegram stream key", source="publishing")
                     await self.release_publisher()
                     self.destination = None
                     self.push_failures = 0
@@ -772,7 +807,7 @@ class Relay:
                         self.output.parent / "runtime",
                     )
                 except (OSError, RuntimeError, ValueError) as exc:
-                    self.last_error = f"publisher launch failed: {type(exc).__name__}"
+                    self.report_error(f"publisher launch failed: {type(exc).__name__}", source="publishing")
                     self.publishing = "publisher launch failed; check RTMP prerequisites"
                     self.next_publish = time.monotonic() + 3
                     return
@@ -781,7 +816,7 @@ class Relay:
                     try:
                         await self.publisher.announce("Live relay output is connecting. Open the channel live stream to check playback.")
                     except Exception as exc:
-                        self.last_error = f"channel announcement failed: {type(exc).__name__}"
+                        self.report_error(f"channel announcement failed: {type(exc).__name__}", source="publishing")
             elif self.push and self.push.poll() is None:
                 self.publishing = "publishing process running"
                 self.push_failures = 0
@@ -846,7 +881,7 @@ class Relay:
                 self.destination = None
                 self.publishing = "idle"
                 self.next_publish = 0
-                self.last_error = released
+                self.report_error(released, kind="info", source="destination")
                 self.recheck.set()
             return self.snapshot()
 
@@ -881,6 +916,7 @@ class Relay:
             self.forced = updated["forced"]
             self.auto_start = updated["auto_start"]
             self.selected_chat_id = updated["selected_chat_id"]
+            self.note_event("info", f"control {action} accepted", "control")
             if action == "select_channel":
                 self.manual_start_chat_id = chat_id if not self.auto_start else None
                 self.decision = {
@@ -980,6 +1016,14 @@ def handler(relay: Relay):
                 if path == "/api/fixtures":
                     status = {"meetings": status["fixtures"]}
                 return self.respond(200, status)
+            if path == "/api/logs":
+                if not self.authorized():
+                    return self.respond(401, {"error": "admin token required"})
+                try:
+                    limit = int(urlsplit(self.path).query.split("limit=")[-1].split("&")[0]) if "limit=" in urlsplit(self.path).query else 50
+                except (TypeError, ValueError):
+                    limit = 50
+                return self.respond(200, {"events": relay.recent_events(limit)})
             if path in ("/live", "/live/"):
                 path = "/live/index.m3u8"
             if path.startswith("/live/"):

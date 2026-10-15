@@ -30,7 +30,8 @@ async function relayStub(
       // The status route echoes the relay's real payload; control routes
       // confirm the write. The worker asks the daemon at /api/stream-status.
       const isStatus = /stream-status$/.test(req.url ?? '');
-      res.writeHead(status).end(JSON.stringify(isStatus ? statusPayload : { ok: true }));
+      const isLogs = /\/api\/logs(\?|$)/.test(req.url ?? '');
+      res.writeHead(status).end(JSON.stringify(isStatus || isLogs ? statusPayload : { ok: true }));
     });
   });
   t.after(() => { server.closeAllConnections(); server.close(); });
@@ -175,6 +176,16 @@ test('admin status exposes preview destinations and live-only source selection',
   });
   assert.equal(relay.seen.some(entry => entry.body?.includes('2291644480')), false,
     'an idle member channel must not issue a source-selection action');
+});
+
+test('admin logs proxy clamps the limit and forwards redacted relay events', async t => {
+  const events = [{ at: '2026-10-15T00:00:00Z', kind: 'error', source: 'destination', detail: 'blocked' }];
+  const relay = await relayStub(t, () => 200, { events } as unknown as Record<string, unknown>);
+  const response = await relay.fetch(`/admin/${SECRET}/logs?limit=500`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { events });
+  assert.equal(relay.seen.at(-1)?.url, '/api/logs?limit=200');
+  assert.equal((await relay.fetch(`/admin/${SECRET}/logs`, { method: 'POST' })).status, 405);
 });
 
 test('method mismatch and unreachable daemon fail without exposing internals', async t => {
