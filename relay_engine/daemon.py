@@ -608,7 +608,8 @@ class Relay:
             elif type(exc).__name__ == "TelegramAccessError":
                 self.last_error = f"destination blocked: {exc}"
             else:
-                self.last_error = f"destination resolution failed: {type(exc).__name__}"
+                step = getattr(exc, "_relay_step", None) or getattr(self.publisher, "_relay_step", None) or "destination"
+                self.last_error = f"destination resolution failed at {step}: {type(exc).__name__}"
             if self.publisher:
                 with contextlib.suppress(Exception):
                     await self.publisher.close()

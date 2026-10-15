@@ -141,6 +141,7 @@ class TelegramPublisher:
         self._destination_lock = asyncio.Lock()
 
     async def connect(self) -> None:
+        self._relay_step = "publisher-connect"
         if self.client is not None and self.client.is_connected() and self._entity is not None:
             return
         session_path = Path(self._session).expanduser()
@@ -166,11 +167,15 @@ class TelegramPublisher:
                 raise TelegramAccessError("RTMP publishing requires an authorized Telegram user account.")
             self._entity, _ = await resolve_channel(self.client, self._channel)
             require_manage_call(self._entity)
-        except BaseException:
+        except BaseException as exc:
             await self.client.disconnect()
             self.client = None
             self._entity = None
-            raise
+            if isinstance(exc, TelegramAccessError):
+                raise
+            tagged = ValueError(f"publisher-connect failed: {type(exc).__name__}")
+            tagged._relay_step = "publisher-connect"  # noqa: SLF001
+            raise tagged from exc
 
     def _require_connected(self) -> None:
         if self.client is None or not self.client.is_connected() or self._entity is None:
@@ -178,6 +183,7 @@ class TelegramPublisher:
 
     async def destination(self) -> str:
         """Get genuine RTMP credentials and create a call only when none exists."""
+        self._relay_step = "publisher-destination"
         from telethon.tl.functions.phone import (
             CreateGroupCallRequest, GetGroupCallRequest, GetGroupCallStreamRtmpUrlRequest,
         )
