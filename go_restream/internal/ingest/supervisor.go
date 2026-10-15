@@ -989,10 +989,14 @@ func (s *Session) initStreamChannels(ctx context.Context, unified bool) error {
 					zap.Int("attempt", i+1),
 					zap.Error(err),
 				)
+				delay := 500 * time.Millisecond
+				if wait, ok := s.client.StreamDCWaitRemaining(); ok && wait > delay {
+					delay = wait + 100*time.Millisecond
+				}
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
-				case <-time.After(500 * time.Millisecond):
+				case <-time.After(delay):
 				}
 				continue
 			}

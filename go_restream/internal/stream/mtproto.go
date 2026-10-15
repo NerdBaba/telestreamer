@@ -135,6 +135,14 @@ func (m *MTProto) streamClient(ctx context.Context, dcID int) (*tg.Client, error
 	if m == nil || m.Default == nil {
 		return nil, ErrNotReady
 	}
+	// Apply metadata/export backoff before any routing shortcut, including
+	// primary-DC download pools. Retrying early otherwise renews FLOOD_WAIT.
+	m.dcMu.Lock()
+	if until, ok := m.waitUntilLocked(dcID); ok {
+		m.dcMu.Unlock()
+		return nil, streamDCWait{dcID: dcID, until: until}
+	}
+	m.dcMu.Unlock()
 	// No stream_dc_id flag — official sends to default datacenter.
 	if dcID <= 0 || m.Telegram == nil {
 		return m.Default, nil
