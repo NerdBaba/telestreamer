@@ -1,19 +1,54 @@
 # Deployed racing Worker
 
-**Origin:** https://rwitc-racing.kristopherreed0227-1etlk.workers.dev
+**Origin:** https://rwitc-racing.curos282.workers.dev
 
-**Verified deployment:** `196c77b7-c86b-4dff-b056-b1d0ad94ea04` — member-channel
-control room with ended-call release, 2026-10-13.
+**Verified deployment:** `c3e690fb-d0ec-4d50-84c5-6dcc73e49d1e` — migrated
+to Cloudflare account `eb588e5973f0d75d6c0e7e90b12fb219`, 2026-10-15.
 
-**D1:** `rwitc-telegram`, database `d9010546-1b5c-45cd-b901-3c3308654b33`.
-Schema applied remotely, including migration `0001_add_selected_chat_id.sql`
-(`relay_state.selected_chat_id`, verified present by `PRAGMA table_info`). The
-primary row is present; no authorized Telegram account is stored yet. Admin and
-session-encryption secrets are set, and the relay origin/token bindings are set
-to the private Render relay.
+**D1:** `rwitc-telegram`, database `b96437ce-2fb6-4a97-9ec4-9b3e720634c5`.
+The fresh schema includes `relay_state.selected_chat_id`. Existing relay
+controls were copied through the authenticated state API: paused, forced Turbo,
+auto-start enabled, no selected member chat. No edge Telegram session was
+migrated; edge API credentials were not available in the previous deployment.
 
-## Observed verification
+Production secrets configure admin authentication, session encryption, and the
+existing private Render relay. The new private panel URL is stored locally in
+ignored `.relay/admin-url`; production secrets are in ignored
+`worker/.dev.vars.production.json`, both mode `0600`. Do not commit either.
 
+## Migration verification, 2026-10-15
+
+| Check | Observed result |
+|---|---|
+| `/healthz` | 200, `ok: true` |
+| Authenticated `/api/relay-state` PUT and GET | Existing controls preserved |
+| Unauthenticated `/api/relay-state` | 401 |
+| Incorrect private admin path | 404 |
+| New private panel `/status` | 200 from the existing Render relay |
+| Browser-rendered panel | Paused, auto-start On, current live source with Preview/Start |
+| Actual Python relay state client against the new Worker | Saved controls loaded successfully; health 200 |
+| Relay checks after updating its default Worker origin | All 70 tests passed |
+| Worker preflight | Typecheck, 48 tests, dry-run passed |
+| Scheduled trigger | Every ten minutes, registered by Wrangler |
+
+### Pending Render cutover
+
+The running Render service still uses its previous Worker/state URLs and relay
+code. Chrome relay access was unavailable during this migration. Repository
+defaults and `render.yaml` now target the new origin, but an existing service
+must also set these environment values and deploy the latest relay commit:
+
+```text
+WORKER_URL=https://rwitc-racing.curos282.workers.dev
+RELAY_STATE_URL=https://rwitc-racing.curos282.workers.dev/api/relay-state
+```
+
+Until that cutover, the new panel controls the existing relay, which persists
+changes through the previous state endpoint. Re-copy the latest controls into
+the new D1 immediately before changing Render's endpoint, so subsequent control
+changes are not lost. Do not delete the previous Worker before cutover.
+
+## Prior verification, 2026-10-13
 | Path | Observed result |
 |---|---|
 | Production `/healthz` after latest deployment | 200, `{"ok":true,"date":"2026-10-13"}` |

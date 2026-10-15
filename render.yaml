@@ -24,9 +24,9 @@ services:
       - key: TELEGRAM_SESSION_B64
         sync: false
       - key: WORKER_URL
-        value: https://rwitc-racing.kristopherreed0227-1etlk.workers.dev
+        value: https://rwitc-racing.curos282.workers.dev
       - key: RELAY_STATE_URL
-        value: https://rwitc-racing.kristopherreed0227-1etlk.workers.dev/api/relay-state
+        value: https://rwitc-racing.curos282.workers.dev/api/relay-state
       - key: RELAY_MEDIA_MODE
         value: copy
       - key: RELAY_HOST

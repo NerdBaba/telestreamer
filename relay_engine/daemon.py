@@ -27,7 +27,7 @@ from relay_engine import fixtures, sources, state as durable_state, tgtv, turbo_
 from relay_engine.publishing import launch_publisher, media_environment
 from relay_engine.session_restore import restore_session
 
-WORKER = "https://rwitc-racing.kristopherreed0227-1etlk.workers.dev"
+WORKER = "https://rwitc-racing.curos282.workers.dev"
 
 
 MEDIA_START_GRACE = 90.0

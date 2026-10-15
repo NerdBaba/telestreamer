@@ -1,6 +1,6 @@
 # RWITC racing and Telegram transport Worker
 
-Deployed at **https://rwitc-racing.kristopherreed0227-1etlk.workers.dev**.
+Deployed at **https://rwitc-racing.curos282.workers.dev**.
 The official HLS proxy runs independently of the local relay. The optional
 local daemon owns FFmpeg/channel publishing; the optional edge login owns a
 separate encrypted MTProto session in D1.
@@ -96,8 +96,7 @@ No paid-plan upgrade is performed automatically.
 
 Configure `RELAY_ORIGIN` with a reachable HTTPS origin for the local daemon and
 `RELAY_TOKEN` with its private admin token. A deployed Worker cannot reach your
-Mac's `127.0.0.1`. The current deployment uses official fallback because no
-public daemon origin has been configured.
+Mac's `127.0.0.1`. The current deployment points to the private Render relay.
 
 Daemon playlists are rewritten to `/live/<segment>` and segments stream without
 whole-body buffering. A reachable daemon's pause, unavailable-source decision,

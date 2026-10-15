@@ -1,14 +1,14 @@
 {
   "name": "rwitc-racing",
   "main": "src/index.ts",
-  "account_id": "0d67f3b7813e178d795f2a5b736306e3",
+  "account_id": "eb588e5973f0d75d6c0e7e90b12fb219",
   "compatibility_date": "2026-10-10",
   "compatibility_flags": ["nodejs_compat"],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "rwitc-telegram",
-      "database_id": "d9010546-1b5c-45cd-b901-3c3308654b33"
+      "database_id": "b96437ce-2fb6-4a97-9ec4-9b3e720634c5"
     }
   ],
   "observability": {

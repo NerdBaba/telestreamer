@@ -92,7 +92,7 @@ requests its stream directly, so leaving a preview open retries the upstream.
 Secret URL, not a searchable path:
 
 ```
-https://rwitc-racing.kristopherreed0227-1etlk.workers.dev/admin/<ADMIN_SECRET>
+https://rwitc-racing.curos282.workers.dev/admin/<ADMIN_SECRET>
 ```
 
 `ADMIN_SECRET` is a Cloudflare secret, not in the repository, and never in
@@ -411,7 +411,7 @@ The retired `stream_watch.py` exploratory probe is replaced by the daemon,
 
 The existing public HLS endpoint is:
 
-`https://rwitc-racing.kristopherreed0227-1etlk.workers.dev/api/live`
+`https://rwitc-racing.curos282.workers.dev/api/live`
 
 The Worker adds `/live`, `/api/fixtures`, `/api/stream-status`, protected
 `/api/relay-state`, `/telegram-login`, and bearer-protected `/telegram/*`
