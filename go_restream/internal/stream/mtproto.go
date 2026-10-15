@@ -188,7 +188,7 @@ func (m *MTProto) streamClient(ctx context.Context, dcID int) (*tg.Client, error
 	invoker, err := m.Telegram.DC(ctx, dcID, 1)
 	if err != nil {
 		if wait, ok := tgerr.AsFloodWait(err); ok {
-			return nil, m.deferStreamDC(dcID, wait)
+			return nil, fmt.Errorf("stream DC %d authorization export (primary DC %d): %w", dcID, m.Telegram.Config().ThisDC, m.deferStreamDC(dcID, wait))
 		}
 		return nil, fmt.Errorf("stream DC %d connect: %w", dcID, errors.Join(m.deferStreamDC(dcID, time.Second), err))
 	}
@@ -275,7 +275,7 @@ func (m *MTProto) PhoneGetGroupCallStreamChannels(ctx context.Context, dcID int,
 	channels, err := client.PhoneGetGroupCallStreamChannels(ctx, &call)
 	if err != nil {
 		if wait, ok := tgerr.AsFloodWait(err); ok {
-			return nil, m.deferStreamDC(dcID, wait)
+			return nil, fmt.Errorf("stream DC %d channel metadata: %w", dcID, m.deferStreamDC(dcID, wait))
 		}
 	}
 	return channels, err
