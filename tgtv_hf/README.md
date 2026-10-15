@@ -14,6 +14,10 @@ Configure TELEGRAM_API_ID, TELEGRAM_API_HASH, SESSION_JSON_B64, PATH_SECRET, and
 
 The public entry point is Gradio on port 7860. tgtv, MediaMTX HLS, and internal RTMP listen only on loopback. The playback-token-protected HLS proxy and browser player share the public HTTPS origin. External publishing must use a supported outbound port; port 1935 is not allowed by Spaces.
 
+## Member-channel playback
+
+The authenticated TGTV playlist is `/p/<PATH_SECRET>/playlist.m3u`. Each active Telegram broadcast has a stable `stream_id`, an HLS route at `/p/<PATH_SECRET>/streams/<stream_id>/play.m3u8`, and a browser preview at `/p/<PATH_SECRET>/watch/<stream_id>`. Keep `PATH_SECRET` private.
+
 Free Spaces can sleep or restart; this is a temporary trial, not an uptime guarantee. The created Space is hosted in the US, not India.
 
 ## Preview and streaming isolation

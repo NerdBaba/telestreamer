@@ -3,6 +3,7 @@ import asyncio
 import base64
 import hmac
 import json
+import re
 import os
 import subprocess
 from contextlib import asynccontextmanager
@@ -111,13 +112,10 @@ async def health():
         return JSONResponse({"status": "relay_starting"}, status_code=503)
 
 
-@app.get("/p/{token}/watch", response_class=HTMLResponse)
-async def watch(token):
-    if not authorized(token):
-        raise HTTPException(404)
-    source = json.dumps(f"/p/{token}/streams/{STREAM_ID}/play.m3u8").replace("<", "\\u003c")
+def watch_page(token: str, stream_id: str, title: str):
+    source = json.dumps(f"/p/{token}/streams/{stream_id}/play.m3u8").replace("<", "\\u003c")
     return HTMLResponse("""<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Turbo live playback</title><script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script></head>
+<title>""" + title + """</title><script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script></head>
 <body><video id="video" controls autoplay muted playsinline style="width:100%;max-height:85vh"></video><p id="status">Connecting to live broadcast…</p><script>
 const video=document.getElementById('video'),status=document.getElementById('status'),source=""" + source + """;
 window.playbackStats={waiting:0,errors:[],samples:[]};
@@ -131,6 +129,19 @@ else if(video.canPlayType('application/vnd.apple.mpegurl')){video.src=source;vid
 else status.textContent='Use VLC with the HLS link; this browser cannot play HLS.';
 </script></body></html>""", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
+
+@app.get("/p/{token}/watch", response_class=HTMLResponse)
+async def watch(token):
+    if not authorized(token):
+        raise HTTPException(404)
+    return watch_page(token, STREAM_ID, "Turbo live playback")
+
+
+@app.get("/p/{token}/watch/{stream_id}", response_class=HTMLResponse)
+async def watch_selected(token: str, stream_id: str):
+    if not authorized(token) or not re.fullmatch(r"[0-9a-f]{12}", stream_id):
+        raise HTTPException(404)
+    return watch_page(token, stream_id, "Telegram live playback")
 
 @app.get("/p/{token}/{path:path}")
 async def proxy(token: str, path: str, request: Request):
