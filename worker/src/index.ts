@@ -14,7 +14,8 @@
  * caching credentials.
  */
 
-export type Env = Cloudflare.Env & TelegramEnv & RelayEnv;
+export type Env = Cloudflare.Env & TelegramEnv & RelayEnv & StreamdeskEnv;
+import {handleStreamdesk,handleStreamdeskState,type StreamdeskEnv} from "./streamdesk";
 
 import { handleProbe } from "./mtproto/probe";
 import { handleTelegram, type TelegramEnv } from "./mtproto/telegram";
@@ -463,6 +464,9 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
+    const hostedState=url.pathname.match(/^\/api\/streamdesk-state\/([^/]+)$/);
+    if(hostedState)return handleStreamdeskState(request,env,hostedState[1]);
+    const desk=await handleStreamdesk(request,env);if(desk)return desk;
     if (url.pathname === "/api/relay-state") return await handleRelayState(request, env);
 
     // Control plane. The secret path segment keeps the entry unguessable; the

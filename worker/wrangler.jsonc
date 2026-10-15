@@ -11,6 +11,7 @@
       "database_id": "b96437ce-2fb6-4a97-9ec4-9b3e720634c5"
     }
   ],
+  "assets": {"directory":"../go_restream/internal/restream/web","binding":"ASSETS","run_worker_first":true},
   "observability": {
     "enabled": true,
     "traces": { "enabled": true }

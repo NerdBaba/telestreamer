@@ -1,4 +1,5 @@
 export interface RelayEnv {
+  STREAMDESK_ENABLED?: string;
   RELAY_ORIGIN?: string;
   RELAY_TOKEN?: string;
   CAPTURE_ORIGIN?: string;
@@ -57,7 +58,7 @@ export async function relayStatus(env: RelayEnv): Promise<RelayStatus | null> {
 export async function wakeRelay(env: RelayEnv): Promise<boolean> {
   if (!env.RELAY_ORIGIN) return false;
   try {
-    const response = await fetch(new URL('/healthz', env.RELAY_ORIGIN), {
+    const response = await fetch(new URL(env.STREAMDESK_ENABLED === 'true' ? '/health' : '/healthz', env.RELAY_ORIGIN), {
       signal: AbortSignal.timeout(15000),
     });
     return response.ok;

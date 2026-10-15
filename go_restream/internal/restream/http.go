@@ -119,7 +119,7 @@ func (d *Dashboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; media-src 'self' blob:; connect-src 'self'; img-src 'self' data:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'")
-	if r.URL.Path == "/health" {
+	if r.URL.Path == "/health" || r.URL.Path == "/healthz" {
 		jsonResponse(w, map[string]string{"status": "ok"})
 		return
 	}

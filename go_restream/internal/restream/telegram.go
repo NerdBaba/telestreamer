@@ -36,7 +36,7 @@ type TelegramDestination struct {
 
 func newDestination(path string, rpc telegramRPC) (*TelegramDestination, error) {
 	d := &TelegramDestination{path: path, rpc: rpc, owned: ownership{ChannelID: OutputChatID}}
-	data, err := os.ReadFile(path)
+	data, err := readState(path)
 	if err == nil {
 		if err = json.Unmarshal(data, &d.owned); err != nil {
 			return nil, err

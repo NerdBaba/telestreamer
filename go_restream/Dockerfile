@@ -24,5 +24,5 @@ COPY --chmod=755 deploy/entrypoint.sh /usr/local/bin/entrypoint
 USER streamdesk
 ENV SESSION_DIR=/data/session SESSION_NAME=tgtv CONFIG_DIR=/data/config HTTP_HOST=0.0.0.0 HTTP_PORT=8090 MAX_CONCURRENT_INGESTS=3 IDLE_GRACE_SECONDS=20 FULL_SCAN_INTERVAL_SECONDS=300 LOG_LEVEL=warn RTMP_SENDER=/usr/local/bin/rtmp_sender SOURCE_ARCHIVE=/app/source.tar.gz
 EXPOSE 8090
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s CMD curl -fsS http://127.0.0.1:8090/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s CMD curl -fsS "http://127.0.0.1:${PORT:-${HTTP_PORT:-8090}}/health" || exit 1
 ENTRYPOINT ["/usr/bin/tini","--","entrypoint"]

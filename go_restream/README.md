@@ -132,3 +132,30 @@ docker compose --env-file .env config --quiet
 For provenance, source license, bundled player and third-party notices see
 [UPSTREAM.md](UPSTREAM.md) and [LICENSE](LICENSE). Telegram lifecycle follows
 [the official group-call publishing flow](https://core.telegram.org/api/group-calls#creating-and-publishing-an-rtmp-livestream).
+
+## Render + Workers deployment
+
+The Worker can host this UI through its assets binding; Render then serves only
+its authenticated API and media. Set `STREAMDESK_ENABLED=true`, `RELAY_ORIGIN`
+and `RELAY_TOKEN` in the Worker after the backend is ready. The existing private
+`/admin/<secret>` URL opens the new desk and issues a private session cookie.
+The Worker preserves its legacy routes and other source integrations.
+
+For Render's ephemeral filesystem, set `SESSION_JSON_B64` to the base64-encoded
+offline-converted gotd JSON session. Startup restores it with mode 0600. Set
+`STATE_URL=https://<worker>/api/streamdesk-state` and `STATE_TOKEN` to the
+Worker's existing `ADMIN_TOKEN`. Apply `worker/migrations/0002_streamdesk_state.sql`
+once; controls and owned call identity are then encrypted in D1. Telegram int64
+call identities are preserved byte-for-byte rather than parsed into JS numbers.
+
+Hosted instances acquire a 60-second D1 lease before connecting Telegram and
+renew every 15 seconds. A renewal error disconnects that instance. **Suspend the
+former session holder before starting the new Render release**: an active lease
+is never forcibly stolen, and standard zero-downtime deploys may otherwise wait
+for the old holder. Use manual cutovers for session-bearing deployments.
+
+The entrypoint maps Render `PORT` to the Go listener and accepts existing
+`TG_API_ID` / `TG_API_HASH` variable names. Health checks support `/health` and
+`/healthz`. The free Render instance is a constrained test target; no paid
+upgrade is made automatically, and actual live-media resource use still needs
+measurement. `MAX_CONCURRENT_INGESTS=2` limits capture concurrency for this target.

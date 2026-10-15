@@ -80,6 +80,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		if err := restream.RestoreHostedSession(cfg.SessionPath()); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		secret, err := config.LoadOrCreatePathSecret(cfg)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)

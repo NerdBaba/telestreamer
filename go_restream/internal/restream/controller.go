@@ -79,7 +79,7 @@ type Controller struct {
 func NewController(path string, d Discovery, p Destination, m Media) (*Controller, error) {
 	c := &Controller{statePath: path, discovery: d, destination: p, media: m, wake: make(chan struct{}, 1)}
 	c.status = Status{Controls: Controls{Auto: true, Fallbacks: []string{}}, Sources: []Source{}, Phase: "idle", Events: []Event{}}
-	data, err := os.ReadFile(path)
+	data, err := readState(path)
 	if err == nil {
 		if err = json.Unmarshal(data, &c.status.Controls); err != nil {
 			return nil, fmt.Errorf("invalid controls state: %w", err)
@@ -90,6 +90,14 @@ func NewController(path string, d Discovery, p Destination, m Media) (*Controlle
 	return c, nil
 }
 func atomicJSON(path string, v any) error {
+	if os.Getenv("STATE_URL") != "" && remoteKey(path) != "" {
+		data, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		_, err = stateRequest(context.Background(), "PUT", remoteKey(path), data)
+		return err
+	}
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err

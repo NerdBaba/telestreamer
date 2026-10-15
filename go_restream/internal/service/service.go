@@ -30,6 +30,13 @@ import (
 )
 
 func Run(ctx context.Context, cfg config.Settings, pathSecret string, log *zap.Logger) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	releaseLease, err := restream.AcquireHostedLease(ctx, cancel)
+	if err != nil {
+		return err
+	}
+	defer releaseLease()
 	lock, err := os.OpenFile(cfg.SessionPath()+".lock", os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err

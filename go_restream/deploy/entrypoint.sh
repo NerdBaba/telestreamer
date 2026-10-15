@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 umask 077
+export TELEGRAM_API_ID="${TELEGRAM_API_ID:-${TG_API_ID:-}}"
+export TELEGRAM_API_HASH="${TELEGRAM_API_HASH:-${TG_API_HASH:-}}"
+export HTTP_PORT="${PORT:-${HTTP_PORT:-8090}}"
 mkdir -p /data/session /data/config
 mediamtx /app/mediamtx.yml &
 media_pid=$!
