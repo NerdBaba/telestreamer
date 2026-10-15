@@ -156,7 +156,12 @@ Hosted instances acquire a 60-second D1 lease before connecting Telegram and
 renew every 15 seconds. A renewal error disconnects that instance. **Suspend the
 former session holder before starting the new Render release**: an active lease
 is never forcibly stolen, and standard zero-downtime deploys may otherwise wait
-for the old holder. Use manual cutovers for session-bearing deployments.
+for the old holder. Render resume can restart the previous image. For the
+first cutover, deploy with `STREAMDESK_STANDBY=true`: this mode serves health
+only and never reads or connects the Telegram session. After that deployment
+is live and the previous image has stopped, set it to `false` and deploy again.
+For later releases, use the same standby-then-activate sequence to let the
+previous session holder disconnect before another instance acquires its lease.
 
 The entrypoint maps Render `PORT` to the Go listener and accepts existing
 `TG_API_ID` / `TG_API_HASH` variable names. Health checks support `/health` and

@@ -18,6 +18,13 @@ func main() {
 		usage()
 		os.Exit(1)
 	}
+	if os.Args[1] == "serve" && os.Getenv("STREAMDESK_STANDBY") == "true" {
+		if err := restream.RunStandby(context.Background()); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if os.Args[1] == "import-session" {
 		if len(os.Args) != 5 || os.Args[4] != "--previous-holder-stopped" {
