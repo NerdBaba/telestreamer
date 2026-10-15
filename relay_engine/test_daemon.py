@@ -578,14 +578,15 @@ class PinnedAvailabilityTests(unittest.IsolatedAsyncioTestCase):
         relay.active_stream_ids = set()
         self.assertFalse(relay.pinned_source_available())
 
-    async def test_discovery_disabled_falls_back_to_the_stream_probe(self):
+    async def test_discovery_disabled_still_uses_the_tgtv_playlist(self):
         relay = self.relay(discover_channels=False)
-        with patch.object(relay, "hf_input_ok", return_value=True) as probe:
-            self.assertTrue(relay.pinned_source_available())
-        probe.assert_called_once()
+        relay.active_stream_ids = {"2631340b81ae"}
+        self.assertTrue(relay.pinned_source_available())
+        relay.active_stream_ids = set()
+        self.assertFalse(relay.pinned_source_available())
 
     async def test_loop_input_is_always_available(self):
-        relay = self.relay(loop_input=True)
+        relay = self.relay(loop_input=True, input_url="/tmp/loop.mp4")
         relay.active_stream_ids = set()
         self.assertTrue(relay.pinned_source_available())
 

@@ -11,33 +11,55 @@ from unittest.mock import AsyncMock, patch
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from datetime import datetime, timezone
+from telethon.tl.functions.channels import GetFullChannelRequest
+from telethon.tl.functions.phone import GetGroupCallRequest
+from telethon.tl.types import Channel, Chat, ChatPhotoEmpty, GroupCall
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from relay_engine import broadcasts, daemon, tgtv  # noqa: E402
 
 
 def channel(chat_id, title, username=None, call=None, **extra):
-    payload = dict(id=chat_id, title=title, username=username, broadcast=True, **extra)
-    if call is not None:
-        payload["call"] = call
-    return SimpleNamespace(**payload)
+    payload = dict(id=chat_id, title=title, username=username, broadcast=True,
+                   photo=ChatPhotoEmpty(), date=None, call_active=call is not None)
+    payload.update(extra)
+    entity = Channel(**payload)
+    entity._test_call = call
+    return entity
+
+
+def group(chat_id, title, call=None):
+    entity = Chat(id=chat_id, title=title, photo=ChatPhotoEmpty(),
+                  participants_count=2, date=None, version=1,
+                  call_active=call is not None)
+    entity._test_call = call
+    return entity
 
 
 def call(rtmp=False, scheduled=False):
-    return SimpleNamespace(rtmp_stream=rtmp,
-                           schedule_date=SimpleNamespace() if scheduled else None)
+    return GroupCall(id=1, access_hash=1, participants_count=2,
+                     unmuted_video_limit=10, version=1, rtmp_stream=rtmp,
+                     schedule_date=datetime(2030, 1, 1, tzinfo=timezone.utc) if scheduled else None)
 
 
 def client_for(entities):
-    """A client whose dialog iteration yields the given entities."""
-    client = SimpleNamespace()
+    """Dialog flags and full call metadata use the actual Telethon types."""
+    by_id = {entity.id: entity for entity in entities}
 
-    async def iter_dialogs():
-        for entity in entities:
-            yield SimpleNamespace(entity=entity)
+    class Client:
+        async def iter_dialogs(self):
+            for entity in entities:
+                yield SimpleNamespace(entity=entity)
 
-    client.iter_dialogs = iter_dialogs
-    return client
+        async def __call__(self, request):
+            if isinstance(request, GetGroupCallRequest):
+                return SimpleNamespace(call=request.call)
+            entity = (request.channel if isinstance(request, GetFullChannelRequest)
+                      else by_id[request.chat_id])
+            return SimpleNamespace(full_chat=SimpleNamespace(call=entity._test_call))
+
+    return Client()
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -67,13 +89,13 @@ class DiscoveryTests(unittest.TestCase):
         # discovery to broadcast channels hid every group the session belongs to.
         rows = self.discover([
             channel(1, "Broadcast live", call=call(rtmp=True)),
-            SimpleNamespace(id=2, title="Community group", broadcast=False, megagroup=True),
-            SimpleNamespace(id=3, title="Group live", broadcast=False, megagroup=True, call=call(rtmp=True)),
-            SimpleNamespace(id=4, title="Basic group", broadcast=False, megagroup=False),
+            channel(2, "Community group", broadcast=False, megagroup=True),
+            channel(3, "Group live", broadcast=False, megagroup=True, call=call(rtmp=True)),
+            group(4, "Basic live group", call=call(rtmp=True)),
             SimpleNamespace(id=5, title="Saved messages", broadcast=False),
         ])
-        self.assertEqual([row["chat_id"] for row in rows], [1, 3, 2])
-        self.assertEqual([row["live"] for row in rows], [True, True, False])
+        self.assertEqual([row["chat_id"] for row in rows], [4, 1, 3, 2])
+        self.assertEqual([row["live"] for row in rows], [True, True, True, False])
 
     def test_live_channels_are_reported_first(self):
         rows = self.discover([
