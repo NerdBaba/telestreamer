@@ -155,17 +155,23 @@ class TelegramPublisher:
         from telethon import TelegramClient
 
         self.client = TelegramClient(str(session_path), self._api_id, self._api_hash)
+        substep = "init"
         try:
+            substep = "client-connect"
             await self.client.connect()
+            substep = "is-user-authorized"
             if not await self.client.is_user_authorized():
                 raise TelegramAccessError(
                     "The Telethon session is not authorized. Run telegram_login.py locally; "
                     "the daemon never requests OTP or 2FA."
                 )
+            substep = "get-me"
             me = await self.client.get_me()
             if me is None or getattr(me, "bot", False):
                 raise TelegramAccessError("RTMP publishing requires an authorized Telegram user account.")
+            substep = "resolve-channel"
             self._entity, _ = await resolve_channel(self.client, self._channel)
+            substep = "require-manage-call"
             require_manage_call(self._entity)
         except BaseException as exc:
             await self.client.disconnect()
@@ -173,8 +179,10 @@ class TelegramPublisher:
             self._entity = None
             if isinstance(exc, TelegramAccessError):
                 raise
-            tagged = ValueError(f"publisher-connect failed: {type(exc).__name__}")
-            tagged._relay_step = "publisher-connect"  # noqa: SLF001
+            step = f"publisher-connect/{substep}"
+            origin = f"{type(exc).__module__}.{type(exc).__name__}"
+            tagged = ValueError(f"{step} failed: {origin}")
+            tagged._relay_step = step  # noqa: SLF001
             raise tagged from exc
 
     def _require_connected(self) -> None:
