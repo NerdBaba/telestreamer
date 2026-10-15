@@ -567,13 +567,25 @@ class Relay:
             return
         credentials = self.telegram_credentials()
         if credentials is None:
+            self.publishing = "blocked: Telegram API credentials missing"
+            self.last_error = "destination blocked: TG_API_ID and TG_API_HASH must both be set"
             return
         api_id, api_hash = credentials
+        try:
+            api_id_int = int(str(api_id).strip())
+        except (TypeError, ValueError):
+            self.publishing = "blocked: Telegram API id is not numeric"
+            self.last_error = "destination blocked: TG_API_ID must be the numeric API id from my.telegram.org"
+            return
+        if api_id_int <= 0 or not str(api_hash).strip():
+            self.publishing = "blocked: Telegram API credentials missing"
+            self.last_error = "destination blocked: TG_API_ID and TG_API_HASH must both be set"
+            return
         try:
             from relay_engine.telegram import TelegramPublisher
             async with self.telegram_lock:
                 self.publisher = TelegramPublisher(
-                    api_id=int(api_id), api_hash=api_hash,
+                    api_id=api_id_int, api_hash=api_hash,
                     session=str(self.path(self.config.get("session", "rrr_live"))),
                     channel=self.config.get("channel", "https://t.me/+-UyRaC_GVSw3NTU1"),
                 )
