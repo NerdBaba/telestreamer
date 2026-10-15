@@ -168,7 +168,11 @@ class TelegramPublisher:
             )
         from telethon import TelegramClient
 
-        self.client = TelegramClient(str(session_path), self._api_id, self._api_hash)
+        substep = "init-client"
+        try:
+            self.client = TelegramClient(str(session_path), self._api_id, self._api_hash)
+        except BaseException as exc:
+            await self._fail_connect(exc, substep)
         substep = "init"
         try:
             substep = "client-connect"
@@ -188,16 +192,24 @@ class TelegramPublisher:
             substep = "require-manage-call"
             require_manage_call(self._entity)
         except BaseException as exc:
-            await self.client.disconnect()
-            self.client = None
-            self._entity = None
-            if isinstance(exc, TelegramAccessError):
-                raise
-            step = f"publisher-connect/{substep}"
-            origin = f"{type(exc).__module__}.{type(exc).__name__}"
-            tagged = ValueError(f"{step} failed: {origin}")
-            tagged._relay_step = step  # noqa: SLF001
-            raise tagged from exc
+            await self._fail_connect(exc, substep)
+
+    async def _fail_connect(self, exc: BaseException, substep: str) -> None:
+        """Disconnect, then report which connect sub-step threw what."""
+        import contextlib
+
+        client, self.client = self.client, None
+        self._entity = None
+        if client is not None:
+            with contextlib.suppress(Exception):
+                await client.disconnect()
+        if isinstance(exc, TelegramAccessError):
+            raise exc
+        step = f"publisher-connect/{substep}"
+        origin = f"{type(exc).__module__}.{type(exc).__name__}"
+        tagged = ValueError(f"{step} failed: {origin}")
+        tagged._relay_step = step  # noqa: SLF001
+        raise tagged from exc
 
     def _require_connected(self) -> None:
         if self.client is None or not self.client.is_connected() or self._entity is None:
