@@ -4,6 +4,7 @@ rtmpAddress: 127.0.0.1:1935
 rtsp: no
 webrtc: no
 srt: no
+moq: no
 hls: yes
 hlsAddress: 127.0.0.1:8888
 hlsVariant: mpegts
