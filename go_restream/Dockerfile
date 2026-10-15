@@ -9,7 +9,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /streamdesk ./cmd/tgtv
 RUN tar --exclude='./.demo-data' --exclude='./data' --exclude='./.env' --exclude='./.git' -czf /source.tar.gz .
 
 FROM debian:bookworm-slim AS native
-RUN apt-get update && apt-get install -y --no-install-recommends gcc pkg-config libavformat-dev libavcodec-dev libavutil-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev pkg-config libavformat-dev libavcodec-dev libavutil-dev && rm -rf /var/lib/apt/lists/*
 COPY deploy/rtmp_sender.c /tmp/rtmp_sender.c
 RUN cc -O2 -Wall -Wextra /tmp/rtmp_sender.c -o /rtmp_sender $(pkg-config --cflags --libs libavformat libavcodec libavutil)
 
