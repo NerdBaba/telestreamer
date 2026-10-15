@@ -532,23 +532,42 @@ class EventLogTests(unittest.IsolatedAsyncioTestCase):
                 "tg_api_id": 1,
                 "tg_api_hash": "isolated-api-hash",
             }, Path(directory))
-            publisher = SimpleNamespace(
-                connect=AsyncMock(side_effect=RuntimeError("private-token")),
-                close=AsyncMock(),
-            )
-            publisher._relay_step = "publisher-connect"
+            from relay_engine.telegram import TelegramAccessError
+
+            async def fail_connect():
+                raise TelegramAccessError("[redacted-access-detail]")
+
+            publisher = SimpleNamespace(connect=fail_connect, close=AsyncMock())
 
             with patch("relay_engine.telegram.TelegramPublisher", return_value=publisher):
                 await relay.resolve_destination()
 
-            self.assertEqual(
-                relay.last_error,
-                "destination resolution failed at publisher-connect: RuntimeError")
+            self.assertEqual(relay.last_error, "destination blocked: [redacted-access-detail]")
+            self.assertEqual(relay.recent_events()[0]["source"], "destination")
             self.assertNotIn("private-token", relay.last_error)
             self.assertEqual(relay.recent_events()[0]["source"], "destination")
 
 
+class SenderBinaryTests(unittest.TestCase):
+    def test_prebuilt_sender_is_preferred_without_toolchain(self):
+        import os
+
+        from relay_engine import publishing
+
+        with tempfile.TemporaryDirectory() as directory:
+            prebuilt = Path(directory) / "prebuilt" / "rtmp_sender"
+            prebuilt.parent.mkdir(parents=True)
+            prebuilt.write_bytes(b"#!/bin/sh\n")
+            prebuilt.chmod(0o700)
+            with patch.dict(os.environ, {"RTMP_SENDER_BINARY": str(prebuilt)}):
+                with patch.object(publishing.subprocess, "run") as run:
+                    chosen = publishing._sender_binary(Path(directory) / "runtime")
+                    run.assert_not_called()
+            self.assertEqual(chosen, prebuilt)
+
+
 class PublishRefreshTests(unittest.IsolatedAsyncioTestCase):
+
 
     """A cached stream key must not fail forever if Telegram rotates it."""
 

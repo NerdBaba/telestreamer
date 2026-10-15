@@ -23,6 +23,27 @@ def media_environment() -> dict[str, str]:
 
 
 def _sender_binary(runtime: Path) -> Path:
+    # The container image prebuilds the sender next to the daemon's runtime
+    # directory, which may differ by working directory. Prefer any usable
+    # prebuilt binary before attempting a toolchain rebuild that a slim
+    # runtime image cannot perform.
+    candidates = []
+    env_binary = os.environ.get("RTMP_SENDER_BINARY")
+    if env_binary:
+        candidates.append(Path(env_binary))
+    try:
+        here = Path(__file__).resolve()
+        for parent in (here.parent.parent, *here.parents):
+            candidates.append(parent / ".relay" / "runtime" / "rtmp_sender")
+    except (OSError, ValueError):
+        pass
+    candidates.append(runtime / "rtmp_sender")
+    for candidate in candidates:
+        try:
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return candidate
+        except OSError:
+            continue
     runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(runtime, 0o700)
     binary = runtime / "rtmp_sender"
