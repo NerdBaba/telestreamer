@@ -75,7 +75,14 @@ async def resolve_channel(client, target: str):
         if not invite:
             raise TelegramAccessError("The private invite link has an empty hash.")
         try:
-            result = await client(CheckChatInviteRequest(invite))
+            try:
+                result = await client(CheckChatInviteRequest(invite))
+            except ValueError as exc:
+                raise TelegramAccessError(
+                    "The private invite could not be checked "
+                    f"({type(exc).__module__}.{type(exc).__name__}); the session may not "
+                    "have the target cached. Supply the channel's numeric id."
+                ) from exc
         except (ChannelPrivateError, InviteHashEmptyError, InviteHashExpiredError,
                 InviteHashInvalidError):
             async for dialogue in client.iter_dialogs():
@@ -109,8 +116,15 @@ async def resolve_channel(client, target: str):
     value = value.lstrip("@")
     lookup = int(value) if value.lstrip("-").isdigit() else value
     try:
-        return await _full_channel(client, await client.get_entity(lookup))
-    except (UsernameInvalidError, UsernameNotOccupiedError, ValueError):
+        try:
+            return await _full_channel(client, await client.get_entity(lookup))
+        except ValueError as exc:
+            raise TelegramAccessError(
+                "The channel lookup could not be resolved "
+                f"({type(exc).__module__}.{type(exc).__name__}); the session may not "
+                "have the target cached. Supply the channel's numeric id."
+            ) from exc
+    except (UsernameInvalidError, UsernameNotOccupiedError):
         # A channel can be renamed, so a username is not a durable target.
         # A numeric id or an invite hash is. Fall back to the dialogs the
         # session already knows, matched by exact channel id.

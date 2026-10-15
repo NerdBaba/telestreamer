@@ -92,6 +92,17 @@ class PrivateInviteTests(unittest.IsolatedAsyncioTestCase):
         entity, _ = await resolve_channel(InviteClient(channel(creator=True), expired=True), INVITE)
         self.assertEqual(entity.id, 42)
 
+    async def test_uncheckable_invite_reports_numeric_id_fallback(self):
+        class BrokenInvite(InviteClient):
+            async def __call__(self, request):
+                if isinstance(request, CheckChatInviteRequest):
+                    raise ValueError("unstable link form")
+                return await super().__call__(request)
+
+        with self.assertRaises(TelegramAccessError) as raised:
+            await resolve_channel(BrokenInvite(channel(creator=True)), INVITE)
+        self.assertIn("numeric id", str(raised.exception))
+
     async def test_expired_invite_does_not_guess_by_title(self):
         client = InviteClient(channel(creator=True), expired=True)
         client.full.full_chat.exported_invite.link = "https://t.me/+DifferentOpaqueHash"
