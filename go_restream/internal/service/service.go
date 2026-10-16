@@ -181,6 +181,9 @@ func Run(ctx context.Context, cfg config.Settings, pathSecret string, log *zap.L
 			return err
 		}
 		dashboard.SourceArchive = os.Getenv("SOURCE_ARCHIVE")
+		testPreview := restream.NewRTMPTestPreview(relayCtx, filepath.Join(cfg.ConfigDir, "test-preview"), cfg.PublicBaseURL+"/test-preview/index.m3u8")
+		dashboard.PreparePreview = testPreview.Prepare
+		go testPreview.Run(relayCtx)
 		srv := &http.Server{
 			Addr:              fmt.Sprintf("%s:%d", cfg.HTTPHost, cfg.HTTPPort),
 			Handler:           dashboard,
@@ -188,7 +191,10 @@ func Run(ctx context.Context, cfg config.Settings, pathSecret string, log *zap.L
 			IdleTimeout:       60 * time.Second,
 		}
 
-		captureServer := &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", cfg.HTTPPort+1), Handler: httpServer.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
+		privateMux := http.NewServeMux()
+		privateMux.Handle("/test-preview/", http.StripPrefix("/test-preview/", testPreview))
+		privateMux.Handle("/", httpServer.Handler())
+		captureServer := &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", cfg.HTTPPort+1), Handler: privateMux, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 		errCh := make(chan error, 2)
 		go func() {
 			if err := captureServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {

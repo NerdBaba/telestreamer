@@ -25,6 +25,7 @@ type Source struct {
 	Detail  string `json:"detail"`
 	URL     string `json:"-"`
 	Headers string `json:"-"`
+	TestURL string `json:"test_url,omitempty"`
 }
 type Controls struct {
 	Auto      bool     `json:"auto"`
@@ -192,6 +193,9 @@ func choose(rows []Source, v Controls) *Source {
 		}
 	}
 	for _, id := range v.Fallbacks {
+		if isTestSource(id) {
+			continue
+		}
 		for _, s := range rows {
 			if s.ID == id && valid(s) {
 				return &s

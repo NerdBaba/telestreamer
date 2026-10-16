@@ -3,3 +3,5 @@
 #demo button{margin-left:12px;padding:5px 9px;font-size:11px}@media(max-width:600px){#demo button{margin:8px 8px 0 0}}
 
 .source-preview video:not([src]){visibility:hidden}
+
+.test-link{display:block;overflow-wrap:anywhere;margin:8px 0 14px;text-decoration:underline}

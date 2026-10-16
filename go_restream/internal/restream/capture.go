@@ -145,12 +145,16 @@ func (d *Capture) Sources(ctx context.Context) ([]Source, error) {
 		mysore = Source{ID: "mysore", Title: "Mysore Race Club", Detail: "Checking official stream"}
 	}
 	rows = append(rows, official, mysore)
+	rows = append(rows, PublicTestSources()...)
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].ChatID == TurboChatID {
 			return true
 		}
 		if rows[j].ChatID == TurboChatID {
 			return false
+		}
+		if isTestSource(rows[i].ID) != isTestSource(rows[j].ID) {
+			return !isTestSource(rows[i].ID)
 		}
 		return rows[i].Title < rows[j].Title
 	})
@@ -166,7 +170,7 @@ func (d *Capture) Sources(ctx context.Context) ([]Source, error) {
 	return rows, nil
 }
 func (d *Capture) Prepare(ctx context.Context, s Source) (bool, error) {
-	if s.ID == "rwitc" || s.ID == "mysore" {
+	if s.ID == "rwitc" || s.ID == "mysore" || isTestSource(s.ID) {
 		return s.Live, nil
 	}
 	// Reclaim abandoned previews while retaining the previous outgoing input

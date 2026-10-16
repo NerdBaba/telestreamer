@@ -1,6 +1,7 @@
 package restream
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
@@ -38,6 +39,14 @@ type previewProxy struct {
 func (p *previewProxy) link(source, raw, headers string) string {
 	sum := sha256.Sum256([]byte(source + raw + headers))
 	key := hex.EncodeToString(sum[:16])
+	// Retain only a known media extension, never the upstream filename/query.
+	// FFmpeg's HLS demuxer rejects extensionless segment URLs.
+	if parsed, err := url.Parse(raw); err == nil {
+		switch ext := strings.ToLower(filepath.Ext(parsed.Path)); ext {
+		case ".m3u8", ".ts", ".mp4", ".m4s", ".aac", ".key":
+			key += ext
+		}
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.links) > 2048 {
@@ -76,6 +85,7 @@ type Dashboard struct {
 	static                http.Handler
 	SourceArchive         string
 	DemoControl           func([]string) error
+	PreparePreview        func(context.Context, Source) (string, error)
 }
 
 func NewDashboard(c *Controller, token, output string) (*Dashboard, error) {
@@ -278,6 +288,14 @@ func (d *Dashboard) preview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raw, headers := source.URL, source.Headers
+	if d.PreparePreview != nil && source.ID == "test-rtmp" {
+		var err error
+		raw, err = d.PreparePreview(r.Context(), source)
+		if err != nil {
+			http.Error(w, "RTMP preview is starting or unavailable", 503)
+			return
+		}
+	}
 	if parts[1] != "index.m3u8" {
 		d.proxy.mu.Lock()
 		link, ok := d.proxy.links[parts[1]]

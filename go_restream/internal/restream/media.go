@@ -80,11 +80,20 @@ func outputReady(path string, now time.Time) bool {
 	return false
 }
 func (m *ProcessMedia) Start(ctx context.Context, s Source, destination string) error {
+	return m.start(ctx, s, destination, !m.Demo)
+}
+
+// StartPreview remuxes a real input to HLS without publishing a destination.
+func (m *ProcessMedia) StartPreview(ctx context.Context, s Source) error {
+	return m.start(ctx, s, "", false)
+}
+
+func (m *ProcessMedia) start(ctx context.Context, s Source, destination string, send bool) error {
 	m.Stop()
 	if s.URL == "" || strings.ContainsAny(s.URL+s.Headers+destination, "\x00") {
 		return fmt.Errorf("source media unavailable")
 	}
-	if !m.Demo && (!strings.HasPrefix(destination, "rtmp://") && !strings.HasPrefix(destination, "rtmps://") || strings.ContainsAny(destination, "\r\n")) {
+	if send && (!strings.HasPrefix(destination, "rtmp://") && !strings.HasPrefix(destination, "rtmps://") || strings.ContainsAny(destination, "\r\n")) {
 		return fmt.Errorf("invalid destination")
 	}
 	if err := os.MkdirAll(m.Dir, 0700); err != nil {
@@ -132,7 +141,7 @@ func (m *ProcessMedia) Start(ctx context.Context, s Source, destination string) 
 		case <-wait.C:
 		}
 	}
-	if !m.Demo {
+	if send {
 		cmd := exec.CommandContext(m.ctx, m.Sender, playlist)
 		cmd.Stdin = strings.NewReader(destination)
 		m.sender, err = launch(cmd)

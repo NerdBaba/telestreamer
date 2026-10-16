@@ -61,6 +61,16 @@ func TestPreviewRewritesBothURILinesAndTags(t *testing.T) {
 	}
 }
 
+func TestPreviewOpaqueLinksKeepMediaExtensions(t *testing.T) {
+	p := previewProxy{links: make(map[string]previewLink)}
+	for _, ext := range []string{".ts", ".m3u8", ".m4s", ".mp4"} {
+		link := p.link("test", "https://example.com/private-segment"+ext+"?token=secret", "")
+		if !strings.HasSuffix(link, ext) || strings.Contains(link, "secret") || strings.Contains(link, "private-segment") {
+			t.Fatal("media clients need a recognizable extension without the provider path", link)
+		}
+	}
+}
+
 var _ http.Handler = (*Dashboard)(nil)
 
 func TestOpaqueWebViewOriginRequiresBrowserSameOriginMetadata(t *testing.T) {

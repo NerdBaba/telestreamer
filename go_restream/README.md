@@ -168,3 +168,32 @@ The entrypoint maps Render `PORT` to the Go listener and accepts existing
 `/healthz`. The free Render instance is a constrained test target; no paid
 upgrade is made automatically, and actual live-media resource use still needs
 measurement. `MAX_CONCURRENT_INGESTS=2` limits capture concurrency for this target.
+
+## Public live test inputs
+
+Two real web-discovered feeds appear after the racing sources:
+
+- Novyny.Live RTMP: `rtmp://95.67.11.153/klive/stream`
+- Al Jazeera English HLS: `https://live-hls-apps-aje-fa.getaj.net/AJE/index.m3u8`
+
+Both decoded video/audio with FFmpeg on 2026-10-16. External feeds can change
+or stop; the Test badge indicates a manual test input, not a continuous health
+check. These IDs (`test-rtmp`, `test-hls`) are never automatic fallbacks, even
+if mistakenly present in saved fallback settings. Use Open preview to inspect
+one, or Use this feed to select it manually for your Telegram output.
+
+The RTMP browser preview remuxes the actual incoming RTMP stream to private
+HLS with `-c copy`, starting only on demand and stopping after 30 seconds
+without preview activity. No generated replacement video is used. The normal
+outgoing relay reads the original RTMP input directly. HLS preview requests
+use the existing authenticated proxy; public input URLs are displayed on the
+cards. Telegram input/provider credentials remain excluded from status JSON.
+
+Opt-in network integration check (no Telegram session opened):
+
+```sh
+STREAMDESK_PUBLIC_FEED_TEST=1 go test ./internal/restream -run TestPublicRTMPPreviewIntegration -v -count=1
+```
+
+Source directory used to discover the current news playback URLs:
+https://github.com/iptv-org/iptv

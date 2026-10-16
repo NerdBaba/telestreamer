@@ -47,15 +47,16 @@ function render(s) {
     attach(card.querySelector('video'),'/preview/'+encodeURIComponent(source.id)+'/index.m3u8',()=>{card.querySelector('.preview-button').classList.remove('hidden');sourcePreview=null;previewError='Preview unavailable for '+source.title+'. The call may be open without playable media. Try again shortly.';showError(previewError);});
    });
   }
-  const primary=source.chat_id===2961901881, chosen=source.id===s.active;
+  const primary=source.chat_id===2961901881, chosen=source.id===s.active, test=!!source.test_url;
   card.classList.toggle('active',chosen);card.querySelector('h3').textContent=source.title;
   const index=(s.controls.fallbacks||[]).indexOf(source.id);
-  card.querySelector('.source-role').textContent=primary?'PRIMARY SOURCE':['rwitc','mysore'].includes(source.id)?'OFFICIAL FALLBACK':index>=0?'FALLBACK '+(index+1):'MEMBER CHANNEL';
+  card.querySelector('.source-role').textContent=test?'PUBLIC TEST · MANUAL ONLY':primary?'PRIMARY SOURCE':['rwitc','mysore'].includes(source.id)?'OFFICIAL FALLBACK':index>=0?'FALLBACK '+(index+1):'MEMBER CHANNEL';
   card.querySelector('.source-detail').textContent=source.detail;
-  const badge=card.querySelector('.source-badge');badge.textContent=chosen?'On air':source.live?'Live':'Offline';badge.classList.toggle('live',source.live);
+  const testLink=card.querySelector('.test-link');testLink.classList.toggle('hidden',!test);if(test){testLink.href=source.test_url;testLink.textContent=source.test_url;}
+  const badge=card.querySelector('.source-badge');badge.textContent=chosen?'On air':test?'Test':source.live?'Live':'Offline';badge.classList.toggle('live',source.live);
   const preview=card.querySelector('.preview-button');preview.disabled=!source.live;preview.lastElementChild.textContent=source.live?'Open preview':'No live broadcast';
   card.querySelector('.use-source').disabled=!source.live||chosen;card.querySelector('.use-source').textContent=chosen?'On air':'Use this feed';
-  const checkbox=card.querySelector('input');checkbox.checked=index>=0;card.querySelector('.fallback').classList.toggle('hidden',primary);
+  const checkbox=card.querySelector('input');checkbox.checked=index>=0;card.querySelector('.fallback').classList.toggle('hidden',primary||test);
   if(!source.live&&sourcePreview===source.id){detach(card.querySelector('video'));preview.classList.remove('hidden');sourcePreview=null;}
  }
  $('events').replaceChildren();for(const event of [...s.events].reverse().slice(0,8)){const li=document.createElement('li');const time=document.createElement('time');time.dateTime=event.time;time.textContent=new Date(event.time).toLocaleTimeString();const text=document.createElement('span');text.textContent=event.detail;li.append(time,text);$('events').append(li);}
