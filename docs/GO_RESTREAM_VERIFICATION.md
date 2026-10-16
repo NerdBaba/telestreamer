@@ -191,7 +191,7 @@ Stop preview was also verified against real Al Jazeera playback at 1920×1080
 while broadcast status remained Paused. Screenshot:
 `docs/screenshots/stream-start-stop-controls.png`.
 
-## Live metrics and budget calculator — 16 October, 11:52–12:01 IST
+## Live metrics and budget calculator — 16 October, 11:52–11:59 IST
 
 The user successfully started the RTMP test and then Mysore; destination creation
 and publishing are now confirmed by the relay's live state and events. The
