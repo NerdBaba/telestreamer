@@ -1,0 +1,102 @@
+{
+  "platform": "Darwin arm64",
+  "source": "1920x1080 30fps H264 target 5Mbps + AAC",
+  "mode": "production copy relay + native sender + RTMP receiver decode",
+  "limits": {
+    "GOMAXPROCS": 1,
+    "GOMEMLIMIT": "256MiB",
+    "cpu_quota": null
+  },
+  "excluded": [
+    "source generator",
+    "HTTP source fixture",
+    "RTMP decode receiver",
+    "load generator",
+    "Telegram capture/MediaMTX"
+  ],
+  "stages": [
+    {
+      "concurrency": 1,
+      "seconds": 25.38,
+      "requests": 449,
+      "failures": 0,
+      "errors": [],
+      "requests_per_second": 17.69,
+      "latency_ms": {
+        "p50": 1.15,
+        "p95": 3.07,
+        "p99": 3.75
+      },
+      "relay_cpu_core_percent": 4.45,
+      "cpu_by_process": {
+        "go": 0.91,
+        "ffmpeg": 0.28,
+        "rtmp_sender": 3.27
+      },
+      "relay_rss_mib_peak": 75.75,
+      "rss_mib_by_process_peak": {
+        "go": 17.38,
+        "ffmpeg": 31.77,
+        "rtmp_sender": 26.61
+      },
+      "phase": "live"
+    },
+    {
+      "concurrency": 8,
+      "seconds": 25.3,
+      "requests": 3638,
+      "failures": 0,
+      "errors": [],
+      "requests_per_second": 143.81,
+      "latency_ms": {
+        "p50": 1.15,
+        "p95": 3.61,
+        "p99": 4.97
+      },
+      "relay_cpu_core_percent": 7.43,
+      "cpu_by_process": {
+        "go": 4.27,
+        "ffmpeg": 0.28,
+        "rtmp_sender": 2.89
+      },
+      "relay_rss_mib_peak": 71.03,
+      "rss_mib_by_process_peak": {
+        "go": 19.5,
+        "ffmpeg": 27.02,
+        "rtmp_sender": 26.61
+      },
+      "phase": "live"
+    },
+    {
+      "concurrency": 32,
+      "seconds": 25.15,
+      "requests": 14594,
+      "failures": 0,
+      "errors": [],
+      "requests_per_second": 580.36,
+      "latency_ms": {
+        "p50": 1.33,
+        "p95": 4.9,
+        "p99": 7.76
+      },
+      "relay_cpu_core_percent": 14.36,
+      "cpu_by_process": {
+        "go": 11.65,
+        "ffmpeg": 0.24,
+        "rtmp_sender": 2.47
+      },
+      "relay_rss_mib_peak": 68.84,
+      "rss_mib_by_process_peak": {
+        "go": 19.84,
+        "ffmpeg": 27.16,
+        "rtmp_sender": 21.84
+      },
+      "phase": "live"
+    }
+  ],
+  "final_phase": "paused",
+  "decoded_frames": 2398,
+  "decode_errors": false,
+  "backend_exit": 0,
+  "passed": true
+}

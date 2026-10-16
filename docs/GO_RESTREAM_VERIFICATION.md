@@ -106,7 +106,9 @@ member feed is no longer enabled as a fallback after the test.
   upgrade was made. CPU/RAM usage charts are unavailable on this plan.
 - `GOMAXPROCS=1`, `GOMEMLIMIT=256MiB`, maximum two input captures. The Go memory
   target excludes FFmpeg, MediaMTX, the native sender and other container memory.
-  No production CPU/RAM or sustained bitrate measurement is claimed.
+  Production CPU/RAM remains unmeasured. A subsequent synthetic local relay
+  stress test and bounded hosted API bursts are recorded in
+  `docs/GO_RESTREAM_STRESS_2026-10-16.md`; those numbers exclude Telegram capture.
 - Render's free tier can sleep; the existing Worker cron generates health
   traffic every ten minutes. It is not a production uptime guarantee.
 - Render's rolling deployment overlaps old and new containers. Every deployment

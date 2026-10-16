@@ -1,0 +1,133 @@
+{
+  "targets": [
+    "render-health",
+    "render-status",
+    "worker-status"
+  ],
+  "request_rate_cap": 20,
+  "read_only": true,
+  "initial_phase": "paused",
+  "stages": [
+    {
+      "concurrency": 1,
+      "seconds": 10.84,
+      "requests": 24,
+      "failures": 0,
+      "requests_per_second": 2.21,
+      "errors": [],
+      "endpoints": {
+        "render-health": {
+          "ok": 8,
+          "p50_ms": 287.55,
+          "p95_ms": 348.85,
+          "p99_ms": 348.85
+        },
+        "render-status": {
+          "ok": 8,
+          "p50_ms": 262.85,
+          "p95_ms": 322.91,
+          "p99_ms": 322.91
+        },
+        "worker-status": {
+          "ok": 8,
+          "p50_ms": 673.82,
+          "p95_ms": 908.31,
+          "p99_ms": 908.31
+        }
+      }
+    },
+    {
+      "concurrency": 5,
+      "seconds": 36.51,
+      "requests": 116,
+      "failures": 1,
+      "requests_per_second": 3.18,
+      "errors": [
+        {
+          "target": "worker-status",
+          "error": "URLError",
+          "status": null
+        }
+      ],
+      "endpoints": {
+        "render-health": {
+          "ok": 39,
+          "p50_ms": 258.15,
+          "p95_ms": 288.95,
+          "p99_ms": 320.46
+        },
+        "render-status": {
+          "ok": 39,
+          "p50_ms": 256.46,
+          "p95_ms": 279.71,
+          "p99_ms": 280.75
+        },
+        "worker-status": {
+          "ok": 37,
+          "p50_ms": 700.16,
+          "p95_ms": 1041.0,
+          "p99_ms": 1116.85
+        }
+      }
+    },
+    {
+      "concurrency": 10,
+      "seconds": 10.52,
+      "requests": 201,
+      "failures": 0,
+      "requests_per_second": 19.11,
+      "errors": [],
+      "endpoints": {
+        "render-health": {
+          "ok": 67,
+          "p50_ms": 255.7,
+          "p95_ms": 283.12,
+          "p99_ms": 639.57
+        },
+        "render-status": {
+          "ok": 67,
+          "p50_ms": 253.38,
+          "p95_ms": 290.49,
+          "p99_ms": 687.78
+        },
+        "worker-status": {
+          "ok": 67,
+          "p50_ms": 488.88,
+          "p95_ms": 912.17,
+          "p99_ms": 1003.48
+        }
+      }
+    },
+    {
+      "concurrency": 20,
+      "seconds": 18.36,
+      "requests": 201,
+      "failures": 0,
+      "requests_per_second": 10.95,
+      "errors": [],
+      "endpoints": {
+        "render-health": {
+          "ok": 67,
+          "p50_ms": 252.86,
+          "p95_ms": 272.87,
+          "p99_ms": 350.58
+        },
+        "render-status": {
+          "ok": 67,
+          "p50_ms": 252.26,
+          "p95_ms": 287.3,
+          "p99_ms": 720.93
+        },
+        "worker-status": {
+          "ok": 67,
+          "p50_ms": 445.54,
+          "p95_ms": 879.56,
+          "p99_ms": 2162.25
+        }
+      }
+    }
+  ],
+  "final_phase": "paused",
+  "controls_unchanged": true,
+  "passed": false
+}
