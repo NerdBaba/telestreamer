@@ -77,3 +77,11 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden){for(const 
 poll();
 
 for(const [label,live] of [['Turbo live',['turbo','free']],['Fallback only',['free']],['All offline',[]]]) {const button=document.createElement('button');button.textContent=label;button.addEventListener('click',async()=>{try{const response=await fetch('/api/demo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({live})});if(!response.ok)throw new Error('Demo change failed');}catch(e){showError(e.message);}});$('demo').append(button);}
+
+function updateCosts(){
+ const values={};for(const key of ['bitrate','hours','previews','allowance','rate','compute']){const input=$('cost-'+key);if(!input.checkValidity()||input.value===''){for(const id of ['hour','month','total'])$('cost-'+id).textContent='—';return;}values[key]=Number(input.value);}
+ const hourly=values.bitrate*0.45*1.1, monthly=hourly*values.hours*30*(1+values.previews), bandwidth=Math.max(0,monthly-values.allowance)*values.rate;
+ $('cost-hour').textContent=hourly.toFixed(2)+' GB';$('cost-month').textContent=monthly.toFixed(1)+' GB';$('cost-total').textContent='$'+(bandwidth+values.compute).toFixed(2)+' USD';
+}
+for(const input of document.querySelectorAll('.cost-inputs input'))input.addEventListener('input',updateCosts);
+updateCosts();

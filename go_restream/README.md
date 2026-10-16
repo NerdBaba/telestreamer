@@ -210,3 +210,10 @@ The status remains Starting or Retrying until the backend confirms Live.
 **Stop preview** closes only the private source player; it does not stop the
 Telegram broadcast. Calls created outside this service remain protected by the
 existing ownership check.
+
+### Bandwidth and remux budget
+
+The dashboard includes an editable calculator for bitrate, streaming hours,
+private preview copies, available bandwidth allowance, egress rate and fixed
+compute cost. It is a scenario estimate, not a live billing meter.
+See [the measured Mysore sample and pricing assumptions](../docs/GO_RESTREAM_COSTS_2026-10-16.md).

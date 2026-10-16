@@ -190,3 +190,23 @@ Stop preview was also verified against real Al Jazeera playback at 1920×1080
 (readyState 4); after stopping, the player was paused and its src was removed,
 while broadcast status remained Paused. Screenshot:
 `docs/screenshots/stream-start-stop-controls.png`.
+
+## Live metrics and budget calculator — 16 October, 11:52–12:01 IST
+
+The user successfully started the RTMP test and then Mysore; destination creation
+and publishing are now confirmed by the relay's live state and events. The
+current Mysore output sample is H.264/AAC 360p25 at approximately 1.08 Mbps.
+Actual Telegram readback remains unverified; RRR is excluded from inputs by
+design, and FREE's separate preview still fails DC 5 metadata readiness.
+
+Worker version `8a10de85-1a3c-43a5-9978-3dcaaf047feb` adds the editable bandwidth
+and compute calculator. Syntax and arithmetic checks passed, including preview
+copies, fixed compute cost, zero hours and empty input. Chrome verified the
+rounded 1.08 Mbps / 6 h/day scenario: $13.68 with no previews or compute charge,
+and $35.12 with one continuous preview plus $7 compute. No Render redeploy,
+plan upgrade, or broadcast control change was made.
+
+Metrics, limitations, full-precision sample calculations and dated price links:
+`docs/GO_RESTREAM_COSTS_2026-10-16.md`. Screenshots:
+`docs/screenshots/render-live-metrics-20261016.png` and
+`docs/screenshots/live-cost-calculator-20261016.png`.
