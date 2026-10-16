@@ -45,12 +45,12 @@ Linux Docker image successfully.
   tracking and must not be blindly re-applied.
 - Render's Docker service `telestreamer` (`srv-db87tru89jmc73cipcgg`) now runs
   the combined Go application from branch `codex/go-auto-restream`, backend
-  commit `de5403a`, at `https://telestreamer-unhc.onrender.com`.
+  commit `98e7ea4`, at `https://telestreamer-unhc.onrender.com`.
 - Successfully cut over the existing relay session after stopping its previous
   holder. Export/import were offline. No local Telegram connection was opened.
   The hosted Go client authenticated and discovered the account's broadcasts.
 - Frontend enabled at `https://rwitc-racing.curos282.workers.dev/`, Worker
-  version `cb92be2b-dc0e-48b1-a68e-79c9ee4fced1`. Includes the other chat's
+  version `c1c5531e-a22e-41b5-9764-a92f6a7259de`. Includes the other chat's
   Mysore resolver and both `/mysore/live` and `/api/mysore/live` routes.
 - Corrected the existing public status/player adapter to use Go `/api/status`
   and authenticated `/output/` paths, including `s<number>.ts` segments.
@@ -121,3 +121,48 @@ member feed is no longer enabled as a fallback after the test.
   finish loading before editing, or the settings UI can overwrite a freshly
   typed value with the old value. Avoid full environment accessibility
   snapshots: they can disclose hidden textarea values.
+
+
+## Real public test inputs — 2026-10-16
+
+- Added `test-rtmp`: Novyny.Live,
+  `rtmp://95.67.11.153/klive/stream`.
+- Added `test-hls`: Al Jazeera English,
+  `https://live-hls-apps-aje-fa.getaj.net/AJE/index.m3u8`.
+- Discovered current URLs from the maintained IPTV-org public directory.
+  Both contain H.264 video and AAC audio. Four-second direct FFmpeg decode
+  passed for each. The public Indexforce RTMP sample also decoded, but was
+  not needed as an additional card.
+- The suggested Akamai `2000341/test/master.m3u8` returned 404. The Eight
+  sample yielded no playable streams and the Blender sample timed out.
+  None was added as a supposedly working test source.
+- Tests are manual only. The controller excludes both IDs from automatic
+  fallbacks even if mistakenly saved in that list. Cards display actual
+  public URLs and have no automatic fallback checkbox.
+- RTMP preview starts an on-demand `-c copy` remux of the real remote feed to
+  private HLS and stops after 30 seconds without preview requests. Outgoing
+  publishing reads the original RTMP URL directly. No generated media used.
+- Real input → Go preview proxy → FFmpeg decode integration check passed.
+  The check exposed FFmpeg's rejection of extensionless HLS segment URLs;
+  opaque preview URLs now retain only a recognized media extension, while
+  continuing to hide provider paths, signed queries and headers. A failing
+  regression test was observed before this correction and passes afterward.
+- Go race suite and vet passed. Worker typecheck and all 72 tests passed.
+- Render standby deployment `dep-db8rsfei0phs738q4sh0` succeeded, followed by
+  active deployment `dep-db8rtlfavr4c73c4i0pg` on backend `98e7ea4`.
+  Standby health explicitly confirmed `telegram_connected:false` between
+  session-bearing instances. Worker deployed as version
+  `c1c5531e-a22e-41b5-9764-a92f6a7259de`, preserving Mysore support.
+- Deployed Chrome playback: Novyny RTMP preview readyState 4, 1920×1080,
+  currentTime 8.83 seconds and playing. Al Jazeera HLS preview readyState 4,
+  1920×1080, currentTime 36.51 seconds and playing. Screenshots:
+  `docs/screenshots/public-rtmp-preview.png` and
+  `docs/screenshots/public-hls-preview.png`.
+- Mysore became fresh/live during verification. Resuming the configured
+  automatic racing fallbacks failed before publishing with
+  `Telegram destination unavailable; inspect destination call and permissions`.
+  No successful outgoing broadcast was observed. The ownership journal is
+  absent (404). The native Telegram app shows an existing livestream in the
+  RRR channel, but the exact backend failure cause is not yet established.
+  The existing call was not discarded. Output was paused again, preserving
+  Turbo → RWITC → Mysore settings; both test previews remain usable.
