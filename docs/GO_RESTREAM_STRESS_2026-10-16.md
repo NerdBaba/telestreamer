@@ -51,7 +51,7 @@ for ten seconds at concurrency 1, 5, 10, then 20, with an overall cap of
 requests and WAN/TLS overhead from the local machine. Every response body was
 checked for the expected JSON shape; no control or media-start request was sent.
 
-Initial run: 542 requests, one Worker `URLError` timeout, no received HTTP error
+Initial run: 542 requests, one Worker connection failure (`URLError`), no received HTTP error
 response. The original harness recorded only the exception type, so the exact
 transport failure cause is unknown. The service's controls remained unchanged.
 Do not erase this failure because a repeat passed.
