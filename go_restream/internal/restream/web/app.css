@@ -5,3 +5,5 @@
 .source-preview video:not([src]){visibility:hidden}
 
 .test-link{display:block;overflow-wrap:anywhere;margin:8px 0 14px;text-decoration:underline}
+
+button.danger{color:var(--danger)}.source-actions{flex-wrap:wrap}.source-commands{display:flex;gap:7px;margin-left:auto}.stop-preview{position:absolute;top:10px;right:10px;padding:5px 8px;font-size:10px;background:#111513df}.source-badge{pointer-events:none}

@@ -166,3 +166,27 @@ member feed is no longer enabled as a fallback after the test.
   RRR channel, but the exact backend failure cause is not yet established.
   The existing call was not discarded. Output was paused again, preserving
   Turbo → RWITC → Mysore settings; both test previews remain usable.
+
+## Start and Stop controls — 2026-10-16
+
+Cloudflare dashboard version `d14cf533-1a97-47c3-b6f1-aa5a07d93420` adds
+Start stream and Stop stream to every source, global Start automatic / Stop
+broadcast controls, and a separate Stop preview action. These use the existing
+authenticated Go control API; no backend deployment or Telegram session move
+was needed. Stop persists paused automation and clears the manual selection.
+
+Chrome verification on the deployed dashboard: global Stop reached Paused /
+Broadcast stopped; Start on the real Al Jazeera HLS feed selected manual mode
+and reached Retrying with the existing Telegram destination error; its per-source
+Stop returned to Paused / Broadcast stopped. Telegram publishing remains blocked
+by that destination error, so this verifies control dispatch and lifecycle state,
+not successful end-to-end Telegram playback.
+
+JavaScript syntax, Go restream race tests and vet, Worker typecheck and all 72
+Worker tests passed. The initial sandboxed Worker run could not bind localhost;
+the same suite passed with the required localhost permissions.
+
+Stop preview was also verified against real Al Jazeera playback at 1920×1080
+(readyState 4); after stopping, the player was paused and its src was removed,
+while broadcast status remained Paused. Screenshot:
+`docs/screenshots/stream-start-stop-controls.png`.

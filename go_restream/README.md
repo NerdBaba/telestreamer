@@ -197,3 +197,16 @@ STREAMDESK_PUBLIC_FEED_TEST=1 go test ./internal/restream -run TestPublicRTMPPre
 
 Source directory used to discover the current news playback URLs:
 https://github.com/iptv-org/iptv
+
+### Manual stream controls
+
+Each source has **Start stream** and **Stop stream**. Start selects that feed for
+the Telegram broadcast; Stop pauses automation, cancels further retries, clears
+the manual selection, and closes the Telegram call owned by this service.
+**Start automatic** restores Turbo priority and the enabled fallbacks. The global
+**Stop broadcast** performs the same stop action from anywhere on the desk.
+The status remains Starting or Retrying until the backend confirms Live.
+
+**Stop preview** closes only the private source player; it does not stop the
+Telegram broadcast. Calls created outside this service remain protected by the
+existing ownership check.
