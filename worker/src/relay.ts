@@ -41,11 +41,40 @@ interface RelayStatus {
 
 export async function relayStatus(env: RelayEnv): Promise<RelayStatus | null> {
   if (!env.RELAY_ORIGIN || !env.RELAY_TOKEN) return null;
-  const response = await fetch(new URL('/api/stream-status', env.RELAY_ORIGIN), {
+  const go = env.STREAMDESK_ENABLED === 'true';
+  const response = await fetch(new URL(go ? '/api/status' : '/api/stream-status', env.RELAY_ORIGIN), {
     headers: { Authorization: `Bearer ${env.RELAY_TOKEN}` },
     signal: AbortSignal.timeout(5000),
   });
   if (!response.ok) throw new Error(`relay status HTTP ${response.status}`);
+  if (go) {
+    // Keep the existing public status/player contract when the private backend
+    // is switched from the Python daemon to the combined Go application.
+    const status = await response.json<{
+      controls: { auto: boolean; paused: boolean; forced: string };
+      sources: Array<{ id: string; chat_id?: number; title: string; live: boolean; detail: string }>;
+      active: string; phase: string; error: string;
+    }>();
+    const ready = status.phase === 'live' && !!status.active;
+    const selected = status.sources.find(s => s.id === status.controls.forced);
+    const active = status.sources.find(s => s.id === status.active);
+    const reason = status.error || (status.controls.paused ? 'relay paused' :
+      !status.controls.auto ? 'automation disabled' : ready ? 'broadcasting' : status.phase);
+    return {
+      paused: status.controls.paused || !status.controls.auto,
+      forced: status.controls.forced || null, auto_start: status.controls.auto,
+      selected_chat_id: selected?.chat_id || null, pending_reason: ready ? null : reason,
+      playout: { ready, source: active?.id || null },
+      publishing: { state: status.phase, running: ready },
+      decision: { available: ready, reason, chat_id: active?.chat_id || null,
+        sources: Object.fromEntries(status.sources.map(s => [s.id, { available: s.live, reason: s.detail }])) },
+      broadcasts: status.sources.filter(s => s.chat_id).map(s => ({
+        chat_id: s.chat_id!, title: s.title, username: null, live: s.live,
+        telegram_live: s.live, rtmp: true, scheduled: false, stream_id: s.id,
+      })),
+      fixtures: [],
+    };
+  }
   return response.json<RelayStatus>();
 }
 
@@ -82,11 +111,15 @@ export async function relayLive(request: Request, env: RelayEnv): Promise<Respon
   }
   const path = new URL(request.url).pathname;
   const name = path.replace(/^\/live\/?/, '') || 'index.m3u8';
-  if (!/^(?:index\.m3u8|\d+\.ts)$/.test(name)) {
+  const go = env.STREAMDESK_ENABLED === 'true';
+  if (!(go ? /^(?:index\.m3u8|s\d+\.ts)$/ : /^(?:index\.m3u8|\d+\.ts)$/).test(name)) {
     return Response.json({ error: 'not found' }, { status: 404 });
   }
-  const upstream = new URL(`/live/${name}`, env.RELAY_ORIGIN);
-  const response = await fetch(upstream, { signal: AbortSignal.timeout(15000) });
+  const upstream = new URL(`/${go ? 'output' : 'live'}/${name}`, env.RELAY_ORIGIN);
+  const response = await fetch(upstream, {
+    headers: go ? { Authorization: `Bearer ${env.RELAY_TOKEN}` } : undefined,
+    signal: AbortSignal.timeout(15000),
+  });
   const headers = {
     'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*',
     'Content-Type': response.headers.get('Content-Type') || 'video/mp2t',
@@ -104,7 +137,7 @@ export async function relayLive(request: Request, env: RelayEnv): Promise<Respon
 
 export async function fixturesResponse(env: RelayEnv): Promise<Response> {
   try {
-    const status = await relayStatus(env);
+    const status = env.STREAMDESK_ENABLED === 'true' ? null : await relayStatus(env);
     if (status) return Response.json({ meetings: status.fixtures, source: 'relay' });
   } catch {
     // Calendar remains readable even while the playout daemon is offline.

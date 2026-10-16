@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-let state = null, busy = false, outputKey = '', sourcePreview = null;
+let state = null, busy = false, outputKey = '', sourcePreview = null, previewError = '';
 const cards = new Map(), players = new Map();
 function detach(video) { const hls = players.get(video); if (hls) hls.destroy(); players.delete(video); video.pause(); video.removeAttribute('src'); video.load(); }
 function attach(video, url, onError) {
@@ -41,9 +41,10 @@ function render(s) {
    card.querySelector('.use-source').addEventListener('click',()=>control({auto:true,paused:false,forced:source.id}));
    card.querySelector('input').addEventListener('change',event=>{const enabled=event.target.checked;const fallbacks=state.controls.fallbacks||[];control({fallbacks:enabled?[...fallbacks.filter(id=>id!==source.id),source.id]:fallbacks.filter(id=>id!==source.id)});});
    card.querySelector('.preview-button').addEventListener('click',()=>{
+    previewError='';showError('');
     if(sourcePreview){const old=cards.get(sourcePreview);if(old){detach(old.querySelector('video'));old.querySelector('.preview-button').classList.remove('hidden');}}
     sourcePreview=source.id;card.querySelector('.preview-button').classList.add('hidden');
-    attach(card.querySelector('video'),'/preview/'+encodeURIComponent(source.id)+'/index.m3u8',()=>{card.querySelector('.preview-button').classList.remove('hidden');sourcePreview=null;showError('Preview is starting or unavailable. Try again in a few seconds.');});
+    attach(card.querySelector('video'),'/preview/'+encodeURIComponent(source.id)+'/index.m3u8',()=>{card.querySelector('.preview-button').classList.remove('hidden');sourcePreview=null;previewError='Preview unavailable for '+source.title+'. The call may be open without playable media. Try again shortly.';showError(previewError);});
    });
   }
   const primary=source.chat_id===2961901881, chosen=source.id===s.active;
@@ -59,7 +60,7 @@ function render(s) {
  }
  $('events').replaceChildren();for(const event of [...s.events].reverse().slice(0,8)){const li=document.createElement('li');const time=document.createElement('time');time.dateTime=event.time;time.textContent=new Date(event.time).toLocaleTimeString();const text=document.createElement('span');text.textContent=event.detail;li.append(time,text);$('events').append(li);}
  if(!s.events.length){const li=document.createElement('li');li.textContent='Monitoring sources. Broadcast activity will appear here.';$('events').append(li);}
- showError(s.error||'');
+ showError(s.error||previewError);
 }
 $('pause').addEventListener('click',()=>control({auto:true,paused:!state.controls.paused}));
 $('auto').addEventListener('click',()=>control({auto:true,paused:false,forced:''}));

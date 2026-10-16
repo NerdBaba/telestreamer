@@ -1,4 +1,4 @@
-# Go stream desk verification — 2026-10-15
+# Go stream desk verification — 2026-10-16
 
 Branch: `codex/go-auto-restream`. Application: `go_restream/`.
 
@@ -28,17 +28,10 @@ Passed locally on macOS:
   and automatic restart. Actual video currentTime advanced at 960×540.
   Screenshot: `docs/screenshots/go-streamdesk-demo.jpg`.
 
-Not exercised:
-
-- Docker image build/run: local Docker engine socket is unavailable.
-- Live Telegram session login, publishing, call creation/discard and Render
-  cutover: existing active sessions have not been connected locally.
-- Production source bitrates, CPU/RAM/network measurements or viewer-load
-  claims. The demo is generated media and simulates the Telegram destination.
-
-Use the cutover checklist in `go_restream/README.md` when the VM is connected.
-Stop the old session holder before starting the new one, then verify actual
-playback from an independent Telegram viewer.
+Production media validation remains incomplete. The local demo and RTMP round
+trip exercise generated media; they do not prove Telegram viewer playback.
+The local Docker engine remains unavailable; Render has now built the actual
+Linux Docker image successfully.
 
 ## Hosted deployment preparation
 
@@ -50,12 +43,79 @@ playback from an independent Telegram viewer.
 - Applied only additive migration `0002_streamdesk_state.sql` to the existing
   D1 database. Legacy migration 0001 was already applied outside migration
   tracking and must not be blindly re-applied.
-- Deployed Worker version `d32bc2ab-930b-45c4-9902-af8f2b31926c`. The frontend
-  feature flag is still off pending a healthy Go backend; existing admin routes
-  continue serving the previous panel.
-- Live authenticated state API test passed: encrypted controls round trip,
-  anonymous request rejected (401), second lease owner rejected (409), and
-  release allowed the second owner. Initial Go cutover controls are paused.
-- Render settings are readable through the user's Chrome session, but browser
-  input is currently blocked by two running Chrome installations sharing a
-  bundle ID. No Render source/environment/session cutover has been performed.
+- Render's Docker service `telestreamer` (`srv-db87tru89jmc73cipcgg`) now runs
+  the combined Go application from branch `codex/go-auto-restream`, backend
+  commit `de5403a`, at `https://telestreamer-unhc.onrender.com`.
+- Successfully cut over the existing relay session after stopping its previous
+  holder. Export/import were offline. No local Telegram connection was opened.
+  The hosted Go client authenticated and discovered the account's broadcasts.
+- Frontend enabled at `https://rwitc-racing.curos282.workers.dev/`, Worker
+  version `cb92be2b-dc0e-48b1-a68e-79c9ee4fced1`. Includes the other chat's
+  Mysore resolver and both `/mysore/live` and `/api/mysore/live` routes.
+- Corrected the existing public status/player adapter to use Go `/api/status`
+  and authenticated `/output/` paths, including `s<number>.ts` segments.
+  The fixtures endpoint continues reading the official calendar with Go active.
+- Full Worker suite: 72/72 passed, TypeScript check passed. A regression test
+  failed before the adapter correction and passed afterward. The test covers
+  authoritative pause, server-only media authorization, playlist rewriting and
+  segment playback against a local HTTP fixture.
+- Dashboard browser check: signed in, connected, correct output channel,
+  official fallback switches and durable controls. Source-preview failures now
+  remain visible across the two-second status refresh.
+- Live API checks after Worker deployment: public `/api/stream-status` reports
+  paused Go state; `/live/index.m3u8` returns 503 `relay paused` rather than
+  bypassing pause with official HLS. Mysore status returns `live:false` and both
+  playback routes return 503 `no active stream for today`.
+
+## Actual Telegram capture test — incomplete
+
+- Turbo was offline. The FREE member channel reported an open RTMP broadcast.
+- Selecting FREE through the deployed dashboard exercised the real controller.
+  Capture failed before destination creation; the event log records
+  `source capture could not start`. No successful output broadcast or independent
+  Telegram viewer playback was observed.
+- Render logs identify `phone.getGroupCallStreamChannels` on stream DC 5 as the
+  failing boundary. Every RPC returned `FLOOD_WAIT_3`, including after honoring
+  the server's three-second wait. It was not an authorization-export failure.
+- Fixed an independently reproduced backoff bug: the same-primary-DC pool path
+  previously bypassed the recorded wait, and bootstrap retried after only
+  500 milliseconds. A fake-invoker test failed with two RPCs before the wait
+  elapsed; it now passes with one RPC and an unchanged deadline. This correction
+  did **not** resolve the production metadata failure.
+- The existing independent HF capture returned a top-level HLS playlist for
+  FREE, but its nested media playlist returned 503. This does not establish
+  whether the cause is source media, Telegram routing or another capture issue.
+  Do not equate an open Telegram call or an HLS master response with playback.
+- Next diagnostic: compare media endpoint selection with Telegram Desktop's
+  `groupCallStreamDcId` / `DcType::MediaCluster` path. Existing TGTV code uses
+  gotd `Pool` for a primary-DC stream and `DC` for a remote stream, both resolving
+  regular endpoints. Desktop prefers media-only endpoints when available.
+  This is a hypothesis, not a verified fix; same-DC authorization/session
+  reuse must remain correct before changing it. References:
+  https://github.com/telegramdesktop/tdesktop/blob/dev/Telegram/SourceFiles/mtproto/facade.h
+  https://github.com/telegramdesktop/tdesktop/blob/dev/Telegram/SourceFiles/mtproto/mtproto_dc_options.cpp
+  https://github.com/telegramdesktop/tdesktop/blob/dev/Telegram/SourceFiles/calls/group/calls_group_call.cpp
+
+Current durable controls: `auto:true`, `paused:true`, `forced:""`,
+`fallbacks:["rwitc","mysore"]`. Turbo remains first automatically; the FREE
+member feed is no longer enabled as a fallback after the test.
+
+## Hosting constraints and safe redeploys
+
+- Current Render free instance advertises 0.15 CPU and 512 MB RAM. No plan
+  upgrade was made. CPU/RAM usage charts are unavailable on this plan.
+- `GOMAXPROCS=1`, `GOMEMLIMIT=256MiB`, maximum two input captures. The Go memory
+  target excludes FFmpeg, MediaMTX, the native sender and other container memory.
+  No production CPU/RAM or sustained bitrate measurement is claimed.
+- Render's free tier can sleep; the existing Worker cron generates health
+  traffic every ten minutes. It is not a production uptime guarantee.
+- Render's rolling deployment overlaps old and new containers. Every deployment
+  of a session-bearing backend must use two stages: save
+  `STREAMDESK_STANDBY=true`, deploy and wait for `/health` to report `standby`;
+  then save `STREAMDESK_STANDBY=false`, deploy and wait for `status:ok`.
+  Standby starts before session restoration and never connects to Telegram.
+  The D1 lease prevents two active Go holders during overlap.
+- Render secret values load asynchronously. Wait for the existing value to
+  finish loading before editing, or the settings UI can overwrite a freshly
+  typed value with the old value. Avoid full environment accessibility
+  snapshots: they can disclose hidden textarea values.
