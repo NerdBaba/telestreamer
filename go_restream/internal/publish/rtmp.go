@@ -200,6 +200,14 @@ func (p *Publisher) IsReady(ctx context.Context) bool {
 
 func writeAll(w io.Writer, data []byte) error {
 	deadline := time.Now().Add(rtmpWriteTimeout)
+	// Check-before-write cannot interrupt a blocked pipe syscall. StdinPipe
+	// returns an os.File; arm its real poll deadline so recovery can proceed.
+	if pipe, ok := w.(interface{ SetWriteDeadline(time.Time) error }); ok {
+		if err := pipe.SetWriteDeadline(deadline); err != nil {
+			return err
+		}
+		defer pipe.SetWriteDeadline(time.Time{})
+	}
 	for len(data) > 0 {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("rtmp write timeout")

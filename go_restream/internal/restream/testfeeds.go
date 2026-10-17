@@ -61,6 +61,9 @@ func (p *RTMPTestPreview) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	p.mu.Lock()
+	p.lastUsed = time.Now()
+	p.mu.Unlock()
 	w.Header().Set("Cache-Control", "no-store")
 	http.ServeFile(w, r, filepath.Join(p.media.Dir, name))
 }

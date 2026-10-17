@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPublicTestFeedsRequireManualSelection(t *testing.T) {
@@ -51,5 +53,40 @@ func TestPublicTestSourcesBypassTelegramCapture(t *testing.T) {
 		if ready, err := c.Prepare(context.Background(), s); err != nil || !ready {
 			t.Fatal(s, ready, err)
 		}
+	}
+}
+
+func TestRTMPPreviewKeepsRunningWhileSegmentsAreRequested(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg unavailable")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := NewRTMPTestPreview(ctx, t.TempDir(), "http://127.0.0.1/test-preview/index.m3u8")
+	p.media.Demo = true
+	defer p.media.Stop()
+	if _, err := p.Prepare(ctx, Source{URL: "generated"}); err != nil {
+		t.Fatal(err)
+	}
+	// HLS players fetch the master once, then keep fetching child media files.
+	p.lastUsed = time.Now().Add(-time.Minute)
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, httptest.NewRequest("GET", "/index.m3u8", nil))
+	if w.Code != 200 {
+		t.Fatalf("preview playlist: HTTP %d", w.Code)
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); p.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	select {
+	case <-time.After(6 * time.Second):
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	p.mu.Lock()
+	healthy := p.media.Healthy(time.Now())
+	p.mu.Unlock()
+	if !healthy {
+		t.Fatal("preview was stopped as idle while the viewer was still requesting HLS media")
 	}
 }

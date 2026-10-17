@@ -272,7 +272,9 @@ func (c *Controller) Step(ctx context.Context, now time.Time) {
 	c.mu.Unlock()
 	eligible := slices.Clone(rows)
 	for i := range eligible {
-		if now.Before(c.cooldown[eligible[i].ID]) {
+		// A manual choice has no alternative to yield to. Retry it with the
+		// normal short backoff instead of closing the call for 30 seconds.
+		if eligible[i].ID != s.Controls.Forced && now.Before(c.cooldown[eligible[i].ID]) {
 			eligible[i].Live = false
 		}
 	}
@@ -291,11 +293,17 @@ func (c *Controller) Step(ctx context.Context, now time.Time) {
 		return
 	}
 	if target.ID == s.Active {
+		detail := "publishing stopped or media stalled"
+		if reporter, ok := c.media.(interface{ Failure() string }); ok {
+			if reason := reporter.Failure(); reason != "" {
+				detail += ": " + reason
+			}
+		}
 		c.cool(target.ID, now)
 		c.destinationURL = ""
 		c.media.Stop()
 		c.set("retrying", "", "")
-		c.fail(now, "publishing stopped or media stalled")
+		c.fail(now, detail)
 		return
 	}
 	c.set("starting", s.Active, "")

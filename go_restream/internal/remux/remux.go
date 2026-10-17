@@ -20,8 +20,8 @@ type Result struct {
 }
 
 func PayloadToMPEGTS(container string, payload []byte, tsOffset float64, logoPath string) (Result, error) {
-	// Unified RTMP fragments already contain synchronized A/V. Padding them
-	// forces a full H.264 decode/encode for every second of captured video.
+	// Keep stream copy for compatible video; reordered MP4 fragments are
+	// normalized below because their independent decode timelines can overlap.
 	return remux(container, payload, nil, "", tsOffset, logoPath, false)
 }
 
@@ -46,7 +46,7 @@ func remux(primaryContainer string, primaryPayload, audioPayload []byte, audioCo
 	}
 
 	container := media.NormalizeContainer(primaryContainer)
-	usePad := padVideo && videoPadApplies(container)
+	usePad := videoPadApplies(container) && (padVideo || probeReorderedVideo(primary.path))
 	copyVideo := !usePad
 	if copyVideo && media.MayNeedVideoTranscode(container) {
 		if codec, ok := probeVideoCodec(primary.path); ok && media.VideoCodecNeedsTranscode(codec) {
@@ -78,6 +78,7 @@ func runRemux(primary, audio *seekableFile, primaryContainer, audioContainer str
 	args := []string{
 		"-hide_banner", "-loglevel", "error",
 		"-fflags", "+genpts+discardcorrupt",
+		"-threads", "2", "-filter_threads", "1", "-filter_complex_threads", "1",
 	}
 
 	if audio != nil {
@@ -154,7 +155,7 @@ func videoOutputArgs(copyVideo bool) []string {
 
 func videoTranscodeArgs() []string {
 	return []string{
-		"-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
+		"-c:v", "libx264", "-threads", "2", "-preset", "veryfast", "-tune", "zerolatency",
 		"-g", "25", "-keyint_min", "25", "-sc_threshold", "0",
 		"-t", formatDuration(partDurationSec),
 	}

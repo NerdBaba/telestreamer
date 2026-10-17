@@ -53,3 +53,40 @@ func TestUnifiedH264MP4PreservesDecodedFrames(t *testing.T) {
 		t.Fatalf("unified H.264 was altered/re-encoded: input=%d frames output=%d; frame hashes must match", len(want), len(got))
 	}
 }
+
+func TestUnifiedMP4WithReorderedFramesNormalizesDecodeTimeline(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg unavailable")
+	}
+	dir := t.TempDir()
+	input := filepath.Join(dir, "reordered.mp4")
+	cmd := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=1", "-c:v", "libx264", "-preset", "veryfast", "-bf", "2", "-g", "25", "-an", input)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generate: %v: %s", err, out)
+	}
+	payload, err := os.ReadFile(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var joined []byte
+	for i := 0; i < 2; i++ {
+		r, err := PayloadToMPEGTS("mp4", payload, float64(i), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		joined = append(joined, r.MPEGTS...)
+	}
+	output := filepath.Join(dir, "joined.ts")
+	if err := os.WriteFile(output, joined, 0600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=has_b_frames", "-of", "csv=p=0", output).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.Trim(line, " ,\r") != "" && strings.Trim(line, " ,\r") != "0" {
+			t.Fatalf("independently timed Telegram fragments retain reordered decode frames: %q", out)
+		}
+	}
+}

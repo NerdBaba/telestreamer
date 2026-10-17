@@ -92,7 +92,7 @@ func videoPadApplies(container string) bool {
 
 func videoPadEncodeArgs() []string {
 	return []string{
-		"-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
+		"-c:v", "libx264", "-threads", "2", "-preset", "veryfast", "-tune", "zerolatency",
 		"-g", "25", "-keyint_min", "25", "-sc_threshold", "0",
 		"-t", formatDuration(partDurationSec),
 	}
@@ -126,4 +126,17 @@ func formatPadFilter(padSeconds float64) string {
 
 func formatDuration(sec float64) string {
 	return strconv.FormatFloat(sec, 'f', 3, 64)
+}
+
+// Telegram MP4 fragments reset their timeline independently. Reordered video
+// needs normalization before concatenation; unknown probe results fail safe.
+func probeReorderedVideo(path string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=has_b_frames", "-of", "default=noprint_wrappers=1:nokey=1", path).Output()
+	if err != nil {
+		return true
+	}
+	frames, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	return err != nil || frames > 0
 }

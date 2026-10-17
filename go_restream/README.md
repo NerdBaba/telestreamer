@@ -134,9 +134,11 @@ For an update, pause the broadcast, build the image, then explicitly stop the
 old backend before `up -d`. Do not run a second Telegram client to test the
 session. Never remove the named data volumes during an update or rollback.
 
-Unified H.264/AAC Telegram fragments now use stream copy, preserving video
-without adding the old thumbnail overlay. Separate native audio/video retains
-its existing padding/transcoding path. The native sender rejects timestamp
+Unified H.264/AAC Telegram fragments without reordered frames use stream copy.
+MP4/MOV video with B-frames (or an unavailable probe) uses the bounded
+normalization path: independent Telegram fragments can otherwise produce
+backwards decode timestamps in MediaMTX. Decoder/encoder work is limited to
+two threads and filters to one. Separate native audio/video retains padding. The native sender rejects timestamp
 jumps or accumulated publishing lag beyond five seconds, letting the controller
 restart from live media instead of sleeping through a minute-long gap.
 
@@ -262,3 +264,20 @@ The dashboard includes an editable calculator for bitrate, streaming hours,
 private preview copies, available bandwidth allowance, egress rate and fixed
 compute cost. It is a scenario estimate, not a live billing meter.
 See [the measured Mysore sample and pricing assumptions](../docs/GO_RESTREAM_COSTS_2026-10-16.md).
+
+## Media recovery and source previews
+
+Live input reads are paced at real time so an HLS download burst cannot
+delete local segments before the RTMP sender consumes them.
+
+Manual sources retry after the controller's short exponential backoff; they no
+longer enter the automatic source cooldown and close the Telegram call merely
+because the sender briefly exits. Automatic primary failures still yield to
+approved fallbacks. Cold media preparation is bounded at 22 seconds inside the
+25-second controller operation. Exact safe sender failure categories appear in
+the dashboard; raw FFmpeg stderr and provider URLs remain private.
+
+Every valid RTMP preview media request refreshes its activity timer. A player
+can fetch the master once and keep fetching child playlists/segments without
+being shut down at 30 seconds. Capture pipe writes now use the OS pipe deadline
+so a blocked FFmpeg reader cannot hold recovery or shutdown indefinitely.

@@ -8,29 +8,72 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 )
 
 type child struct {
-	cmd    *exec.Cmd
-	done   chan struct{}
-	exited atomic.Bool
+	cmd         *exec.Cmd
+	done        chan struct{}
+	exited      atomic.Bool
+	diagnostics senderDiagnostics
 }
 
 func launch(cmd *exec.Cmd) (*child, error) {
 	// FFmpeg diagnostics can include provider URLs or signed headers. Keep them
 	// out of the public event log and report the stage through the controller.
+	p := &child{cmd: cmd, done: make(chan struct{})}
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stderr = &p.diagnostics
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("media executable unavailable")
 	}
-	p := &child{cmd: cmd, done: make(chan struct{})}
 	go func() { _ = cmd.Wait(); p.exited.Store(true); close(p.done) }()
 	return p, nil
 }
+
+// Only exact, static native-sender messages may reach the dashboard. FFmpeg
+// output can contain private URLs, so unknown lines are discarded and bounded.
+type senderDiagnostics struct {
+	mu       sync.Mutex
+	line     []byte
+	overflow bool
+	reason   string
+}
+
+func (d *senderDiagnostics) Write(data []byte) (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, b := range data {
+		if b == '\n' {
+			if !d.overflow {
+				switch string(d.line) {
+				case "RTMP sender: initialization failed", "RTMP sender: expected local HLS playlist path",
+					"RTMP sender: invalid destination pipe", "RTMP sender: cannot open local HLS input",
+					"RTMP sender: input requires H.264 video and AAC when audio is present",
+					"RTMP sender: cannot configure FLV output", "RTMP sender: cannot connect publishing output",
+					"RTMP sender: media read or publishing write failed", "RTMP sender: timestamp discontinuity or publishing lag":
+					d.reason = strings.TrimPrefix(string(d.line), "RTMP sender: ")
+				}
+			}
+			d.line = d.line[:0]
+			d.overflow = false
+		} else if len(d.line) < 256 {
+			d.line = append(d.line, b)
+		} else {
+			d.overflow = true
+		}
+	}
+	return len(data), nil
+}
+func (p *child) Failure() string {
+	p.diagnostics.mu.Lock()
+	defer p.diagnostics.mu.Unlock()
+	return p.diagnostics.reason
+}
+
 func (p *child) stop() {
 	if p == nil {
 		return
@@ -109,7 +152,9 @@ func (m *ProcessMedia) start(ctx context.Context, s Source, destination string, 
 	if m.Demo {
 		args = append(args, "-re", "-f", "lavfi", "-i", "testsrc2=size=960x540:rate=25", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-g", "50", "-c:a", "aac")
 	} else {
-		args = append(args, "-rw_timeout", "15000000", "-fflags", "+genpts+discardcorrupt")
+		// HLS can deliver several buffered segments at once. Pace input reads
+		// so the local live window cannot delete data ahead of the RTMP sender.
+		args = append(args, "-re", "-rw_timeout", "15000000", "-fflags", "+genpts+discardcorrupt")
 		if s.Headers != "" {
 			args = append(args, "-headers", s.Headers)
 		}
@@ -125,7 +170,9 @@ func (m *ProcessMedia) start(ctx context.Context, s Source, destination string, 
 	}
 	wait := time.NewTicker(100 * time.Millisecond)
 	defer wait.Stop()
-	deadline := time.NewTimer(18 * time.Second)
+	// Nested HLS discovery can exceed 18s while reads still make progress.
+	// Keep startup bounded below the controller's 25s operation deadline.
+	deadline := time.NewTimer(22 * time.Second)
 	defer deadline.Stop()
 	for !outputReady(playlist, time.Now()) {
 		select {
@@ -155,4 +202,18 @@ func (m *ProcessMedia) start(ctx context.Context, s Source, destination string, 
 func (m *ProcessMedia) Stop() { m.sender.stop(); m.sender = nil; m.ffmpeg.stop(); m.ffmpeg = nil }
 func (m *ProcessMedia) Healthy(now time.Time) bool {
 	return m.ffmpeg != nil && !m.ffmpeg.exited.Load() && (m.Demo || m.sender != nil && !m.sender.exited.Load()) && outputReady(filepath.Join(m.Dir, "index.m3u8"), now)
+}
+
+// Failure reports a safe stage, never raw media stderr or provider URLs.
+func (m *ProcessMedia) Failure() string {
+	if m.ffmpeg != nil && m.ffmpeg.exited.Load() {
+		return "source media process exited"
+	}
+	if m.sender != nil && m.sender.exited.Load() {
+		if reason := m.sender.Failure(); reason != "" {
+			return reason
+		}
+		return "publishing sender exited"
+	}
+	return ""
 }
