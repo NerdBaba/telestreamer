@@ -33,4 +33,5 @@ tgtv_hf/bin/
 go_restream/data/
 go_restream/.demo-data/
 go_restream/streamdesk
+go_restream/deploy/prebuilt/
 !go_restream/.env.example

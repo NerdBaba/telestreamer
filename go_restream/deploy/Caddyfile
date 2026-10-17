@@ -1,0 +1,12 @@
+{
+	default_sni {$STREAMDESK_PUBLIC_HOST}
+}
+
+{$STREAMDESK_PUBLIC_HOST} {
+	tls {
+		issuer acme {
+			profile shortlived
+		}
+	}
+	reverse_proxy streamdesk:8090
+}

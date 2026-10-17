@@ -1,0 +1,47 @@
+{"level": 0, "http": 200, "segments": 0, "refs": 1, "ref_names": ["main_stream.m3u8"], "ended": false, "bytes": 357, "tags": ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-INDEPENDENT-SEGMENTS", "#EXT-X-STREAM-INF:BANDWIDTH=1874628,AVERAGE-BANDWIDTH=1874628,CODECS=\"avc1.64001f,mp4a.40.2\",RESOLUTION=1280x720,FRAME-RATE=1000.000"]}
+{"level": 1, "http": 200, "segments": 1, "refs": 1, "ref_names": ["eddbcd2308cc_main_seg0.ts"], "ended": false, "bytes": 340, "tags": ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-ALLOW-CACHE:NO", "#EXT-X-TARGETDURATION:2", "#EXT-X-MEDIA-SEQUENCE:0", "#EXT-X-PROGRAM-DATE-TIME:2026-10-17T05:03:48.46Z", "#EXTINF:1.96000,"]}
+{"segment_http": 200, "bytes": 459284}
+ffprobe 0 {
+    "programs": [
+        {
+            "streams": [
+                {
+                    "codec_name": "h264",
+                    "profile": "High",
+                    "width": 1280,
+                    "height": 720,
+                    "pix_fmt": "yuv420p",
+                    "level": 31,
+                    "avg_frame_rate": "0/0"
+                },
+                {
+                    "codec_name": "aac",
+                    "profile": "LC",
+                    "avg_frame_rate": "0/0"
+                }
+            ]
+        }
+    ],
+    "streams": [
+        {
+            "codec_name": "h264",
+            "profile": "High",
+            "width": 1280,
+            "height": 720,
+            "pix_fmt": "yuv420p",
+            "level": 31,
+            "avg_frame_rate": "0/0"
+        },
+        {
+            "codec_name": "aac",
+            "profile": "LC",
+            "avg_frame_rate": "0/0"
+        }
+    ]
+}
+
+{"decode_exit": 0, "decoded_frames": ["50"], "errors": ""}
+{"keyframe_intervals_seconds": [1.0]}
+{"playlist_advancing": true, "next_http": 200}
+{"direct_mtx": "index.m3u8", "http": 302, "segments": 0, "tags": []}
+{"direct_mtx": "main_stream.m3u8", "http": 401, "segments": 0, "tags": []}

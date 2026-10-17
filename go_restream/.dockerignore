@@ -5,6 +5,7 @@ data
 *.session*
 *.json.export
 streamdesk
+!deploy/prebuilt/streamdesk
 
 !.env.example
 *export*.json

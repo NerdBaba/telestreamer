@@ -79,7 +79,9 @@ func RewriteHLSPlaylist(text, base string) string {
 }
 
 func rewriteURI(uri, base string) string {
-	uri = strings.TrimSpace(strings.Split(uri, "?")[0])
+	// MediaMTX reader sessions live in the query string; nested requests
+	// must retain them or the server returns 401 and playback stays blank.
+	uri = strings.TrimSpace(uri)
 	if uri == "" || strings.HasPrefix(uri, "http://") || strings.HasPrefix(uri, "https://") {
 		return uri
 	}

@@ -1,0 +1,3 @@
+{"level": 0, "http": 0, "segments": 0, "refs": 0, "ref_names": [], "ended": false, "bytes": 0, "tags": []}
+{"direct_mtx": "index.m3u8", "http": 302, "segments": 0, "tags": []}
+{"direct_mtx": "main_stream.m3u8", "http": 401, "segments": 0, "tags": []}

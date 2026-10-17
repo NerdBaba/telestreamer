@@ -3,7 +3,8 @@
 A single Go service discovers joined Telegram RTMP broadcasts, captures them
 through the bundled TGTV engine, and publishes one upload to **4347395930**
 (`@RRRINDIALIVERACE`). Telegram handles viewer delivery. No Python daemon,
-HF Space, Render relay or Cloudflare Worker is needed in the new deployment.
+HF Space or Python relay is needed. Cloudflare Workers can host the private UI
+and proxy its API; the combined backend runs on a Linux host.
 
 ## Behavior
 
@@ -45,8 +46,9 @@ outgoing preview is generated media; it is not Telegram viewer verification.
 
 ## VM deployment and session cutover
 
-The application is prepared for a Linux VM. These steps are for cutover when
-that VM is connected; this branch does not change the existing hosted services.
+Production moved to the HostDZire VPS on 2026-10-17; Render is suspended. See
+[the measured deployment report](../docs/GO_RESTREAM_VPS_2026-10-17.md). The steps
+below describe a fresh deployment; preserve the single-session-holder rule.
 
 1. Build the image first with `docker compose build`. Create the private data
    directory: `mkdir -p data/session data/config` and
@@ -94,6 +96,49 @@ and restarts the whole container. The image runs as UID 10001 with bounded
 logs and a 96 MiB tmpfs for outgoing HLS. Three concurrent input captures allow
 one outgoing feed, one selected preview and one source preparing to take over.
 Each active preview adds input bandwidth; inactive cards do not decode video.
+
+## Small VPS build and deployment
+
+`deploy/compose.vps.yml` uses a locally cross-compiled Go binary so compiling the
+large Telegram bindings does not consume the VPS's runtime memory. From this
+directory, prepare the build context (never include private environment files):
+
+```sh
+mkdir -p deploy/prebuilt
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o deploy/prebuilt/streamdesk ./cmd/tgtv
+tar --exclude=deploy/prebuilt --exclude='deploy/.env*' -czf deploy/prebuilt/source.tar.gz cmd internal deploy Dockerfile compose.yml go.mod go.sum LICENSE UPSTREAM.md README.md DESIGN.md .dockerignore .env.example
+```
+
+Securely transfer this directory to the server, including `deploy/prebuilt`.
+Keep the private backend environment in `deploy/.env.vps` (mode 0600). Configure
+`deploy/.env` with `STREAMDESK_PUBLIC_HOST=your-public-hostname`. The active
+backend environment needs `HTTP_PORT=8090`, `STREAMDESK_STANDBY=false`,
+`GOMAXPROCS=2`, `GOMEMLIMIT=768MiB` and `MAX_CONCURRENT_INGESTS=2`, in addition
+to the existing Telegram credentials, admin token and hosted-state settings.
+
+```sh
+cd deploy
+docker compose -p streamdesk -f compose.vps.yml build
+# Stop the former session holder before activation, including during updates.
+docker compose -p streamdesk -f compose.vps.yml up -d
+```
+
+Use Compose v2. The service has a 1.75 CPU / 2 GiB limit and persistent session
+storage; Caddy has a separate 256 MiB limit. Caddy exposes HTTPS on 443 and port
+80 for ACME. Its certificate state persists in named volumes. Only the backend's
+loopback port 8090 is published. Set the Worker's `RELAY_ORIGIN` to the HTTPS
+**hostname**; Worker fetch does not support direct IP origins. The current
+SSLip hostname depends on public DNS; an owned domain can replace it.
+
+For an update, pause the broadcast, build the image, then explicitly stop the
+old backend before `up -d`. Do not run a second Telegram client to test the
+session. Never remove the named data volumes during an update or rollback.
+
+Unified H.264/AAC Telegram fragments now use stream copy, preserving video
+without adding the old thumbnail overlay. Separate native audio/video retains
+its existing padding/transcoding path. The native sender rejects timestamp
+jumps or accumulated publishing lag beyond five seconds, letting the controller
+restart from live media instead of sleeping through a minute-long gap.
 
 ## Control/API and private state
 

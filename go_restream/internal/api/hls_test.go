@@ -1,6 +1,11 @@
 package api
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/aleskxyz/tgtv/internal/config"
+)
 
 func TestValidHLSFilename(t *testing.T) {
 	cases := map[string]bool{
@@ -60,4 +65,23 @@ func splitLines(text string) []string {
 		lines = append(lines, text[start:])
 	}
 	return lines
+}
+
+func TestRewriteHLSPreservesReaderSession(t *testing.T) {
+	base := "http://127.0.0.1:8091/p/secret/hls/stream"
+	in := "#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,URI=\"audio.m3u8?session=reader-123\"\n#EXT-X-STREAM-INF:BANDWIDTH=1\nmain_stream.m3u8?session=reader-123\n"
+	out := RewriteHLSPlaylist(in, base)
+	for _, want := range []string{base + "/audio.m3u8?session=reader-123", base + "/main_stream.m3u8?session=reader-123"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("reader session lost: want %q in %q", want, out)
+		}
+	}
+}
+
+func TestMediamtxURLForwardsReaderQuery(t *testing.T) {
+	s := &Server{cfg: config.Settings{MediamtxHLSURL: "http://127.0.0.1:8888"}}
+	want := "http://127.0.0.1:8888/live/stream/main_stream.m3u8?session=reader-123&_HLS_msn=42"
+	if got := s.mediamtxURL("stream", "main_stream.m3u8", "session=reader-123&_HLS_msn=42"); got != want {
+		t.Fatalf("reader query lost: got %q want %q", got, want)
+	}
 }

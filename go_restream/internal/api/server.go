@@ -78,9 +78,12 @@ func (s *Server) hlsBase(streamID string) string {
 	return fmt.Sprintf("%s/p/%s/hls/%s", s.cfg.PublicBaseURL, s.secret, streamID)
 }
 
-func (s *Server) mediamtxURL(streamID, filename string) string {
-	base := strings.Split(filename, "?")[0]
-	return fmt.Sprintf("%s/live/%s/%s", s.cfg.MediamtxHLSURL, streamID, base)
+func (s *Server) mediamtxURL(streamID, filename, rawQuery string) string {
+	url := fmt.Sprintf("%s/live/%s/%s", s.cfg.MediamtxHLSURL, streamID, filename)
+	if rawQuery != "" {
+		url += "?" + rawQuery
+	}
+	return url
 }
 
 func (s *Server) playlist(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +144,7 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url := s.mediamtxURL(streamID, "index.m3u8")
+	url := s.mediamtxURL(streamID, "index.m3u8", r.URL.RawQuery)
 	body, _, status, err := ProxyMediamtx(s.httpClient, url, MediamtxHeaders(s.cfg.MediamtxHLSCDNSecret))
 	if err != nil || status != http.StatusOK {
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8")
@@ -194,7 +197,7 @@ func (s *Server) hlsFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url := s.mediamtxURL(streamID, filename)
+	url := s.mediamtxURL(streamID, filename, r.URL.RawQuery)
 	headers := MediamtxHeaders(s.cfg.MediamtxHLSCDNSecret)
 	retries := 3
 	if s.ingest.IsIngesting(streamID) && strings.HasSuffix(filename, ".ts") {

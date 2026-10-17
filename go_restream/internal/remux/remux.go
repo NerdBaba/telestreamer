@@ -20,14 +20,16 @@ type Result struct {
 }
 
 func PayloadToMPEGTS(container string, payload []byte, tsOffset float64, logoPath string) (Result, error) {
-	return remux(container, payload, nil, "", tsOffset, logoPath)
+	// Unified RTMP fragments already contain synchronized A/V. Padding them
+	// forces a full H.264 decode/encode for every second of captured video.
+	return remux(container, payload, nil, "", tsOffset, logoPath, false)
 }
 
 func MuxAV(vContainer string, vPayload []byte, aContainer string, aPayload []byte, tsOffset float64, logoPath string) (Result, error) {
-	return remux(vContainer, vPayload, aPayload, aContainer, tsOffset, logoPath)
+	return remux(vContainer, vPayload, aPayload, aContainer, tsOffset, logoPath, true)
 }
 
-func remux(primaryContainer string, primaryPayload, audioPayload []byte, audioContainer string, tsOffset float64, logoPath string) (Result, error) {
+func remux(primaryContainer string, primaryPayload, audioPayload []byte, audioContainer string, tsOffset float64, logoPath string, padVideo bool) (Result, error) {
 	primary, err := newSeekableBytes(primaryPayload, media.ContainerSuffix(primaryContainer))
 	if err != nil {
 		return Result{}, err
@@ -44,7 +46,7 @@ func remux(primaryContainer string, primaryPayload, audioPayload []byte, audioCo
 	}
 
 	container := media.NormalizeContainer(primaryContainer)
-	usePad := videoPadApplies(container)
+	usePad := padVideo && videoPadApplies(container)
 	copyVideo := !usePad
 	if copyVideo && media.MayNeedVideoTranscode(container) {
 		if codec, ok := probeVideoCodec(primary.path); ok && media.VideoCodecNeedsTranscode(codec) {

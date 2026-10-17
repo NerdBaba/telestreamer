@@ -12,6 +12,7 @@
 #include <libavutil/time.h>
 
 #define IO_TIMEOUT_US (15LL * AV_TIME_BASE)
+#define MAX_PACING_DRIFT_US (5LL * AV_TIME_BASE)
 #define SECRET_CAPACITY 8192
 
 static volatile sig_atomic_t stopped;
@@ -134,6 +135,14 @@ int main(int argc, char **argv) {
             int64_t media_time = av_rescale_q(timestamp, source->time_base, AV_TIME_BASE_Q);
             if (media_start == AV_NOPTS_VALUE) { media_start = media_time; wall_start = av_gettime_relative(); }
             int64_t due = wall_start + media_time - media_start;
+            // An HLS discontinuity can jump DTS by minutes. Never sleep that
+            // long (or keep sending a stale backlog) while appearing healthy.
+            // Exit so the controller can reopen a fresh live window.
+            int64_t drift = due - av_gettime_relative();
+            if (drift > MAX_PACING_DRIFT_US || drift < -MAX_PACING_DRIFT_US) {
+                failure = "timestamp discontinuity or publishing lag";
+                goto done;
+            }
             deadline = 0;
             while (!stopped && av_gettime_relative() < due) {
                 int64_t remaining = due - av_gettime_relative();
