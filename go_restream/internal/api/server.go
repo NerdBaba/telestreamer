@@ -74,6 +74,14 @@ func (s *Server) checkSecret(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+func (s *Server) watchViewer(streamID string) func() {
+	if watcher, ok := s.viewers.(interface{ Watch(string) func() }); ok {
+		return watcher.Watch(streamID)
+	}
+	s.viewers.RecordActivity(streamID)
+	return func() {}
+}
+
 func (s *Server) hlsBase(streamID string) string {
 	return fmt.Sprintf("%s/p/%s/hls/%s", s.cfg.PublicBaseURL, s.secret, streamID)
 }
@@ -133,7 +141,8 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.viewers.RecordActivity(streamID)
+	release := s.watchViewer(streamID)
+	defer release()
 	if err := s.ingest.EnsureIngest(r.Context(), streamID); s.respondIngestError(w, err) {
 		return
 	}
@@ -179,7 +188,8 @@ func (s *Server) hlsFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.viewers.RecordActivity(streamID)
+	release := s.watchViewer(streamID)
+	defer release()
 	if err := s.ingest.EnsureIngest(r.Context(), streamID); s.respondIngestError(w, err) {
 		return
 	}

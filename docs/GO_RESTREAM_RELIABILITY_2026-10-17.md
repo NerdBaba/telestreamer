@@ -40,6 +40,11 @@ enabled for genuine discontinuities or stale publishing.
   per-fragment work on the two-core VPS. The generated B-frame regression failed
   before the correction and passes after; the zero-B-frame frame-hash test still
   verifies lossless copying. The short news fragments are not committed.
+- **Capture bootstrap lifetime:** pending media requests could outlast the
+  20-second idle grace and have their own ingest stopped while waiting. Request
+  scopes now hold activity through HTTP bootstrap/readiness and controller
+  preparation, then release it for normal idle cleanup. A real viewer-manager
+  regression verifies both the hold and cleanup after release.
 - **Capture recovery:** the old eight-second write timeout checked the clock
   before calling a blocking pipe write. It could never interrupt that write.
   Actual OS pipe write deadlines now bound it. A real blocked-pipe regression

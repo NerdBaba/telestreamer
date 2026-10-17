@@ -180,7 +180,8 @@ func (d *Capture) Prepare(ctx context.Context, s Source) (bool, error) {
 			d.Ingest.StopIngest(e.StreamID)
 		}
 	}
-	d.Viewers.RecordActivity(s.ID)
+	release := d.Viewers.Watch(s.ID)
+	defer release()
 	if err := d.Ingest.EnsureIngest(ctx, s.ID); err != nil {
 		return false, err
 	}
