@@ -1,0 +1,2 @@
+{"ready": true, "startup_seconds": 10.15, "first_segments": 2}
+{"samples": 30, "empty_playlists": 0, "http_errors": 0, "sequence_resets": 0, "sequence_advanced": true, "decode_exit": 0, "decoded_frames": "25", "decode_errors": "", "capture_dts_crashes": 0, "elapsed_seconds": 75.72}

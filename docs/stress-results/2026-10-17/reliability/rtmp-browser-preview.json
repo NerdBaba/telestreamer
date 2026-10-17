@@ -1,0 +1,11 @@
+{
+  "date": "2026-10-17",
+  "source": "test-rtmp",
+  "origin": "https://rwitc-racing.curos282.workers.dev",
+  "preview_started_approximately_utc": "06:03:36",
+  "checks": [
+    {"checked_approximately_utc": "06:04:18", "width": 1920, "height": 1080, "currentTime": 27.609642, "readyState": 4, "error": null},
+    {"checked_approximately_utc": "06:05:16", "width": 1920, "height": 1080, "currentTime": 83.848161, "readyState": 4, "error": null}
+  ],
+  "note": "Video DOM measurements; approximate UTC values taken from the dashboard's visible last-check field. Preview stayed open between observations."
+}
